@@ -2,5 +2,5 @@ from django.apps import AppConfig
 
 
 class SynchConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'synch'
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "synch"
