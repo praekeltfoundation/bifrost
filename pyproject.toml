@@ -38,3 +38,7 @@ extend-select = [
     "T20", # flake8-print
     "PTH", # flake8-use-pathlib
 ]
+
+[[tool.mypy.overrides]]
+module = ["environ.*"]
+ignore_missing_imports = true
