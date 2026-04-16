@@ -122,6 +122,5 @@ finally:
 
 ## Notes And Limitations
 
-- The app currently has no custom admin integration or HTTP views.
 - Lock cleanup is lazy. Expired rows remain in the table until the next acquisition for the same `key`, at which point the row is reused.
 - There is no context-manager helper yet; callers must handle `release()` themselves.
