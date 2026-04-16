@@ -52,6 +52,8 @@ Useful local URLs:
 
 The Docker image uses `bifrost.settings.production`, which requires the `SECRET_KEY`, `ALLOWED_HOSTS`, `DATABASE_URL`, and `CSRF_TRUSTED_ORIGINS` environment variables to be set at runtime.
 
+GitHub Actions publishes the image to `ghcr.io/<owner>/<repo>` on every branch push using a branch-prefixed SHA tag, and on pushes of tags matching `v*` using the semantic version tag.
+
 Build the image:
 
 ```bash
