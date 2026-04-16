@@ -88,23 +88,29 @@ class LockRefreshTests(TestCase):
         self.assertGreater(refreshed_lock.expires_at, original_expiry)
 
     def test_refresh_raises_for_different_owner(self):
-        lock = Lock.acquire(key="daily-sync", owner="worker-1")
+        initial_time = timezone.now()
+        expired_time = initial_time + Lock.DEFAULT_TTL + timedelta(seconds=1)
+
+        with patch("lock.models.timezone.now", return_value=initial_time):
+            lock = Lock.acquire(key="daily-sync")
+
+        with patch("lock.models.timezone.now", return_value=expired_time):
+            Lock.acquire(key="daily-sync")
 
         with self.assertRaises(LockOwnershipError):
-            lock.refresh(owner="worker-2")
+            lock.refresh()
 
     def test_refresh_reacquires_expired_lock_for_same_owner(self):
         initial_time = timezone.now()
         expired_time = initial_time + Lock.DEFAULT_TTL + timedelta(seconds=1)
 
         with patch("lock.models.timezone.now", return_value=initial_time):
-            lock = Lock.acquire(key="daily-sync", owner="worker-1")
+            lock = Lock.acquire(key="daily-sync")
 
         with patch("lock.models.timezone.now", return_value=expired_time):
-            refreshed_lock = lock.refresh(owner="worker-1")
+            refreshed_lock = lock.refresh()
 
         self.assertEqual(refreshed_lock.pk, lock.pk)
-        self.assertEqual(refreshed_lock.owner, "worker-1")
         self.assertGreater(refreshed_lock.expires_at, expired_time)
 
     def test_refresh_raises_if_lock_has_expired_and_owner_changed(self):

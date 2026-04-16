@@ -7,6 +7,7 @@ Use `uv` for all Python and Django commands in this repository.
 
 - Use `uv run` for commands that execute Python tools or project entrypoints, including Django management commands, Ruff, Mypy, and tests.
 - Do not prefix plain shell utilities such as `rg`, `sed`, `cat`, `git`, `ls`, or `find` with `uv run`.
+- Do not hand-write Django migrations. Generate them with Django management commands, for example `uv run ./manage.py makemigrations`.
 
 After every code change, run the full local verification suite:
 
