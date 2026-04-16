@@ -31,6 +31,8 @@ uv run ./manage.py runserver
 
 To run Celery against RabbitMQ locally, point the `CELERY_BROKER_URL` environment variable at your broker if you are not using the default guest account on `localhost`.
 
+Sentry is optional. Bifrost only initializes Sentry when `SENTRY_DSN` is set. You can further configure it with `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_SEND_DEFAULT_PII`, `SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_PROFILES_SAMPLE_RATE`, and `SENTRY_DEBUG`.
+
 Start a worker:
 
 ```bash
@@ -48,9 +50,16 @@ Useful local URLs:
 - App health endpoint: `http://127.0.0.1:8000/health`
 - Django admin: `http://127.0.0.1:8000/admin/`
 
-## Docker
+## Configuration
+There is a base `bifrost.settings.base` settings module for local development, which is extended by `bifrost.settings.production` for running in production environments.
 
-The Docker image uses `bifrost.settings.production`, which requires the `SECRET_KEY`, `ALLOWED_HOSTS`, `DATABASE_URL`, and `CSRF_TRUSTED_ORIGINS` environment variables to be set at runtime.
+If `SENTRY_DSN` environment variable is set, sentry will be configured.
+
+`bifrost.settings.production` requires the `SECRET_KEY`, `ALLOWED_HOSTS`, `DATABASE_URL`, and `CSRF_TRUSTED_ORIGINS` environment variables to be set at runtime.
+
+
+## Docker
+The docker image uses `bifrost.settings.production` by default, so the required environment variables must be set when running the container.
 
 GitHub Actions publishes the image to `ghcr.io/<owner>/<repo>` on every branch push using a branch-prefixed SHA tag, and on pushes of tags matching `v*` using the semantic version tag.
 
