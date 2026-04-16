@@ -126,6 +126,12 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+CELERY_BROKER_URL = env(
+    "CELERY_BROKER_URL",
+    default="amqp://guest:guest@localhost:5672//",
+)
+CELERY_TASK_IGNORE_RESULT = True
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

@@ -29,6 +29,20 @@ Start the Django development server:
 uv run ./manage.py runserver
 ```
 
+To run Celery against RabbitMQ locally, point the `CELERY_BROKER_URL` environment variable at your broker if you are not using the default guest account on `localhost`.
+
+Start a worker:
+
+```bash
+uv run celery -A bifrost worker --loglevel=info
+```
+
+Start Celery Beat:
+
+```bash
+uv run celery -A bifrost beat --loglevel=info
+```
+
 Useful local URLs:
 
 - App health endpoint: `http://127.0.0.1:8000/health`
