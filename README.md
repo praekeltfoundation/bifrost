@@ -48,6 +48,37 @@ Useful local URLs:
 - App health endpoint: `http://127.0.0.1:8000/health`
 - Django admin: `http://127.0.0.1:8000/admin/`
 
+## Docker
+
+The Docker image uses `bifrost.settings.production`, which requires the `SECRET_KEY`, `ALLOWED_HOSTS`, `DATABASE_URL`, and `CSRF_TRUSTED_ORIGINS` environment variables to be set at runtime.
+
+Build the image:
+
+```bash
+docker build -t bifrost .
+```
+
+To run the app against PostgreSQL in Docker, start a database container on a shared network and point `DATABASE_URL` at it:
+
+```bash
+docker network create bifrost
+
+docker run -d --rm \
+  --name bifrost-db \
+  --network bifrost \
+  -e POSTGRES_DB=bifrost \
+  -e POSTGRES_USER=bifrost \
+  -e POSTGRES_PASSWORD=bifrost \
+  postgres:16
+
+docker run --rm -p 8000:8000 \
+  --network bifrost \
+  -e SECRET_KEY=change-me \
+  -e ALLOWED_HOSTS='*' \
+  -e DATABASE_URL='postgresql://bifrost:bifrost@bifrost-db:5432/bifrost' \
+  bifrost
+```
+
 
 ## Full Verification
 
