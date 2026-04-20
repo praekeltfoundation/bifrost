@@ -16,6 +16,7 @@ from synch.ccmdd import (
     CCMDDAPIClient,
     CCMDDAPIError,
     CCMDDLongRunningOperationTimeout,
+    CCMDDOperationResult,
 )
 from synch.tasks import healthcheck
 
@@ -103,7 +104,10 @@ class CCMDDAPIClientTests(SimpleTestCase):
     def test_iter_limited_prescriptions_posts_without_date_updated_when_unset(self):
         session = Mock()
         session.request.return_value = self.make_response(
-            payload={"result": 1, "data": [{"id": "rx-1"}]},
+            payload={
+                "result": CCMDDOperationResult.IMMEDIATE,
+                "data": [{"id": "rx-1"}],
+            },
         )
         client = self.make_client(session=session)
 
@@ -120,7 +124,10 @@ class CCMDDAPIClientTests(SimpleTestCase):
     def test_iter_limited_patients_posts_with_date_updated_when_provided(self):
         session = Mock()
         session.request.return_value = self.make_response(
-            payload={"result": 1, "data": [{"id": "patient-1"}]},
+            payload={
+                "result": CCMDDOperationResult.IMMEDIATE,
+                "data": [{"id": "patient-1"}],
+            },
         )
         client = self.make_client(session=session)
 
@@ -145,7 +152,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": 2,
+                    "result": CCMDDOperationResult.LONG_RUNNING_OPERATION,
                     "response": {
                         "status_location": "https://status/1",
                         "resource_location": "https://resource/1",
@@ -153,13 +160,22 @@ class CCMDDAPIClientTests(SimpleTestCase):
                 },
             ),
             self.make_response(
-                payload={"result": 1, "data": {"status": "running"}},
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": {"status": "running"},
+                },
             ),
             self.make_response(
-                payload={"result": 1, "data": {"status": "succeeded"}},
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": {"status": "succeeded"},
+                },
             ),
             self.make_response(
-                payload={"result": 1, "data": [{"id": "rx-1"}, {"id": "rx-2"}]},
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": [{"id": "rx-1"}, {"id": "rx-2"}],
+                },
             ),
         ]
         client = self.make_client(session=session, sleep=sleep)
@@ -211,7 +227,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": 3,
+                    "result": CCMDDOperationResult.MULTI_LONG_RUNNING_OPERATION,
                     "responses": [
                         {
                             "status_location": "https://status/1",
@@ -225,16 +241,28 @@ class CCMDDAPIClientTests(SimpleTestCase):
                 },
             ),
             self.make_response(
-                payload={"result": 1, "data": {"status": "succeeded"}},
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": {"status": "succeeded"},
+                },
             ),
             self.make_response(
-                payload={"result": 1, "data": [{"id": "patient-1"}]},
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": [{"id": "patient-1"}],
+                },
             ),
             self.make_response(
-                payload={"result": 1, "data": {"status": "succeeded"}},
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": {"status": "succeeded"},
+                },
             ),
             self.make_response(
-                payload={"result": 1, "data": [{"id": "patient-2"}]},
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": [{"id": "patient-2"}],
+                },
             ),
         ]
         client = self.make_client(session=session, sleep=sleep)
@@ -258,7 +286,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": 2,
+                    "result": CCMDDOperationResult.LONG_RUNNING_OPERATION,
                     "response": {
                         "status_location": "https://status/1",
                         "resource_location": "https://resource/1",
@@ -267,11 +295,17 @@ class CCMDDAPIClientTests(SimpleTestCase):
             ),
             self.make_response(status_code=503),
             self.make_response(
-                payload={"result": 1, "data": {"status": "running"}},
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": {"status": "running"},
+                },
             ),
             *[
                 self.make_response(
-                    payload={"result": 1, "data": {"status": "running"}},
+                    payload={
+                        "result": CCMDDOperationResult.IMMEDIATE,
+                        "data": {"status": "running"},
+                    },
                 )
                 for _ in range(LONG_RUNNING_STATUS_POLL_LIMIT - 1)
             ],
@@ -300,7 +334,12 @@ class CCMDDAPIClientTests(SimpleTestCase):
         session.request.side_effect = [
             self.make_response(status_code=429),
             self.make_response(status_code=503),
-            self.make_response(payload={"result": 1, "data": [{"id": "rx-1"}]}),
+            self.make_response(
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": [{"id": "rx-1"}],
+                }
+            ),
         ]
         client = self.make_client(
             session=session,
@@ -320,7 +359,12 @@ class CCMDDAPIClientTests(SimpleTestCase):
         random_uniform = Mock(return_value=0.5)
         session.request.side_effect = [
             requests.ConnectionError("temporary"),
-            self.make_response(payload={"result": 1, "data": [{"id": "rx-1"}]}),
+            self.make_response(
+                payload={
+                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "data": [{"id": "rx-1"}],
+                }
+            ),
         ]
         client = self.make_client(
             session=session,
@@ -350,7 +394,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": 2,
+                    "result": CCMDDOperationResult.LONG_RUNNING_OPERATION,
                     "response": {
                         "status_location": "https://status/1",
                         "resource_location": "https://resource/1",
@@ -359,7 +403,10 @@ class CCMDDAPIClientTests(SimpleTestCase):
             ),
             *[
                 self.make_response(
-                    payload={"result": 1, "data": {"status": "running"}},
+                    payload={
+                        "result": CCMDDOperationResult.IMMEDIATE,
+                        "data": {"status": "running"},
+                    },
                 )
                 for _ in range(LONG_RUNNING_STATUS_POLL_LIMIT)
             ],

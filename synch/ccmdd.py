@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import datetime
+from enum import IntEnum
 from random import uniform
 from time import sleep
 from typing import Any
@@ -16,6 +17,12 @@ REQUEST_TIMEOUT_SECONDS = 30
 RETRY_LIMIT = 5
 
 RETRYABLE_HTTP_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
+
+
+class CCMDDOperationResult(IntEnum):
+    IMMEDIATE = 1
+    LONG_RUNNING_OPERATION = 2
+    MULTI_LONG_RUNNING_OPERATION = 3
 
 
 class CCMDDAPIError(Exception):
@@ -159,9 +166,9 @@ class CCMDDAPIClient:
         self.sleep(delay_seconds)
 
     def _extract_operations(self, payload: dict[str, Any]) -> list[dict[str, str]]:
-        result = payload["result"]
-        if result == 2:
+        result = CCMDDOperationResult(payload["result"])
+        if result is CCMDDOperationResult.LONG_RUNNING_OPERATION:
             return [payload["response"]]
-        if result == 3:
+        if result is CCMDDOperationResult.MULTI_LONG_RUNNING_OPERATION:
             return payload["responses"]
         raise CCMDDAPIError("Expected CCMDD long-running operation response.")
