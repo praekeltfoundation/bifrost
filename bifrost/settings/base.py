@@ -139,8 +139,8 @@ CELERY_BROKER_URL = env(
 )
 CELERY_TASK_IGNORE_RESULT = True
 CELERY_BEAT_SCHEDULE = {
-    "sync-patients": {
-        "task": "synch.tasks.sync_patients",
+    "sync-ccmdd": {
+        "task": "synch.tasks.sync_all",
         "schedule": crontab(minute=0, hour=0),
     }
 }
