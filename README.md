@@ -105,3 +105,4 @@ uv run ./manage.py test
 ## Documentation
 
 - [Lock app](docs/lock.md)
+- [CCMDD client](docs/ccmdd-client.md)
