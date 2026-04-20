@@ -41,16 +41,6 @@ for patient in client.iter_limited_patients(
 
 The methods return iterators of raw item dictionaries from the CCMDD API response.
 
-## Patient synchronization
-
-The `synch.tasks.sync_patients` Celery task uses `iter_limited_patients()` to incrementally synchronize patients into the local database.
-
-- It uses the latest stored patient `date_updated` as the next CCMDD `date_updated` filter.
-- If there are no local patients yet, it starts from the Unix epoch (`1970-01-01 00:00:00.000000` UTC) so the API still receives a `date_updated` value.
-- It stores API fields `id`, `date_created`, and `date_updated` in explicit model columns.
-- It stores the remaining patient fields in a JSON payload column.
-- It acquires the `sync-patients` lock before syncing so only one patient sync runs at a time.
-
 ## `date_updated`
 
 `date_updated` is optional for both methods.
