@@ -85,11 +85,11 @@ class CCMDDAPIClient:
         )
         payload = response.json()
 
-        if response.status_code == 202:
+        if payload["result"] is CCMDDOperationResult.IMMEDIATE:
+            yield from payload["data"]
+        else:
             yield from self._iter_long_running_records(payload)
             return
-
-        yield from payload["data"]
 
     def _iter_long_running_records(
         self, payload: dict[str, Any]
