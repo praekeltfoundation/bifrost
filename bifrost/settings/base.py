@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 
 import environ
+import sentry_sdk
 
 env = environ.Env()
 
@@ -31,6 +32,10 @@ SECRET_KEY = env(
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
+
+SENTRY_DSN = env("SENTRY_DSN", default="")
+if SENTRY_DSN:
+    sentry_sdk.init(dsn=SENTRY_DSN)
 
 ALLOWED_HOSTS: list[str] = []
 
