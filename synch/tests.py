@@ -105,7 +105,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
         session = Mock()
         session.request.return_value = self.make_response(
             payload={
-                "result": CCMDDOperationResult.IMMEDIATE,
+                "result": 1,
                 "data": [{"id": "rx-1"}],
             },
         )
@@ -125,7 +125,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
         session = Mock()
         session.request.return_value = self.make_response(
             payload={
-                "result": CCMDDOperationResult.IMMEDIATE,
+                "result": 1,
                 "data": [{"id": "patient-1"}],
             },
         )
@@ -152,7 +152,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": CCMDDOperationResult.LONG_RUNNING_OPERATION,
+                    "result": 2,
                     "response": {
                         "status_location": "https://status/1",
                         "resource_location": "https://resource/1",
@@ -161,19 +161,19 @@ class CCMDDAPIClientTests(SimpleTestCase):
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "running"},
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "succeeded"},
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": [{"id": "rx-1"}, {"id": "rx-2"}],
                 },
             ),
@@ -227,7 +227,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": CCMDDOperationResult.MULTI_LONG_RUNNING_OPERATION,
+                    "result": 3,
                     "responses": [
                         {
                             "status_location": "https://status/1",
@@ -242,25 +242,25 @@ class CCMDDAPIClientTests(SimpleTestCase):
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "succeeded"},
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": [{"id": "patient-1"}],
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "succeeded"},
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": [{"id": "patient-2"}],
                 },
             ),
@@ -286,7 +286,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": CCMDDOperationResult.LONG_RUNNING_OPERATION,
+                    "result": 2,
                     "response": {
                         "status_location": "https://status/1",
                         "resource_location": "https://resource/1",
@@ -296,14 +296,14 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(status_code=503),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "running"},
                 },
             ),
             *[
                 self.make_response(
                     payload={
-                        "result": CCMDDOperationResult.IMMEDIATE,
+                        "result": 1,
                         "data": {"status": "running"},
                     },
                 )
@@ -336,7 +336,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(status_code=503),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": [{"id": "rx-1"}],
                 }
             ),
@@ -361,7 +361,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             requests.ConnectionError("temporary"),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": [{"id": "rx-1"}],
                 }
             ),
@@ -394,7 +394,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": CCMDDOperationResult.LONG_RUNNING_OPERATION,
+                    "result": 2,
                     "response": {
                         "status_location": "https://status/1",
                         "resource_location": "https://resource/1",
@@ -404,7 +404,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             *[
                 self.make_response(
                     payload={
-                        "result": CCMDDOperationResult.IMMEDIATE,
+                        "result": 1,
                         "data": {"status": "running"},
                     },
                 )

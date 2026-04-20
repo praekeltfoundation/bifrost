@@ -85,7 +85,7 @@ class CCMDDAPIClient:
         )
         payload = response.json()
 
-        if payload["result"] is CCMDDOperationResult.IMMEDIATE:
+        if payload["result"] == CCMDDOperationResult.IMMEDIATE:
             yield from payload["data"]
         else:
             yield from self._iter_long_running_records(payload)
@@ -167,8 +167,8 @@ class CCMDDAPIClient:
 
     def _extract_operations(self, payload: dict[str, Any]) -> list[dict[str, str]]:
         result = CCMDDOperationResult(payload["result"])
-        if result is CCMDDOperationResult.LONG_RUNNING_OPERATION:
+        if result == CCMDDOperationResult.LONG_RUNNING_OPERATION:
             return [payload["response"]]
-        if result is CCMDDOperationResult.MULTI_LONG_RUNNING_OPERATION:
+        if result == CCMDDOperationResult.MULTI_LONG_RUNNING_OPERATION:
             return payload["responses"]
         raise CCMDDAPIError("Expected CCMDD long-running operation response.")
