@@ -14,6 +14,7 @@ from pathlib import Path
 
 import environ
 import sentry_sdk
+from celery.schedules import crontab
 
 env = environ.Env()
 
@@ -137,6 +138,16 @@ CELERY_BROKER_URL = env(
     default="amqp://guest:guest@localhost:5672//",
 )
 CELERY_TASK_IGNORE_RESULT = True
+CELERY_BEAT_SCHEDULE = {
+    "sync-patients": {
+        "task": "synch.tasks.sync_patients",
+        "schedule": crontab(minute=0, hour=0),
+    }
+}
+
+CCMDD_BASE_URL = env("CCMDD_BASE_URL", default="")
+CCMDD_USERNAME = env("CCMDD_USERNAME", default="")
+CCMDD_PASSWORD = env("CCMDD_PASSWORD", default="")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
