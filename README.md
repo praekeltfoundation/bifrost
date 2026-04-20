@@ -31,6 +31,12 @@ uv run ./manage.py runserver
 
 To run Celery against RabbitMQ locally, point the `CELERY_BROKER_URL` environment variable at your broker if you are not using the default guest account on `localhost`.
 
+Sync uses these CCMDD settings:
+
+- `CCMDD_BASE_URL`
+- `CCMDD_USERNAME`
+- `CCMDD_PASSWORD`
+
 Sentry is optional. Bifrost only initializes Sentry when `SENTRY_DSN` is set. You can further configure it with `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_SEND_DEFAULT_PII`, `SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_PROFILES_SAMPLE_RATE`, and `SENTRY_DEBUG`.
 
 Start a worker:
@@ -44,6 +50,8 @@ Start Celery Beat:
 ```bash
 uv run celery -A bifrost beat --loglevel=info
 ```
+
+Celery Beat schedules synchronization once per day at `00:00` UTC. The task acquires a lock before syncing, so only one sync run can proceed at a time even if multiple workers are active.
 
 Useful local URLs:
 
@@ -106,3 +114,4 @@ uv run ./manage.py test
 
 - [Lock app](docs/lock.md)
 - [CCMDD client](docs/ccmdd-client.md)
+- [Tasks](docs/tasks.md)

@@ -53,6 +53,7 @@ The methods return iterators of raw item dictionaries from the CCMDD API respons
 The client handles the CCMDD long-running operation flow automatically.
 
 - For `202 Accepted` responses, it follows the returned `status_location` until the operation succeeds.
+- It treats the API `result` field as an integer code from the wire format: `1` immediate, `2` long-running, `3` multi long-running.
 - It waits 5 minutes between each poll of the status endpoint.
 - It gives up after 12 status polls, which is a 1 hour wait budget.
 - Temporary retries due to failures while polling do not count against the 12 poll limit.

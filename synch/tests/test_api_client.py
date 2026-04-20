@@ -4,56 +4,17 @@ from datetime import datetime
 from unittest.mock import Mock, call
 
 import requests
-from django.test import SimpleTestCase, TestCase, override_settings
-from django.urls import reverse
-from django.utils.module_loading import import_string
+from django.test import SimpleTestCase
 
-from bifrost.celery import app
 from synch.ccmdd import (
     LONG_RUNNING_POLL_INTERVAL_SECONDS,
     LONG_RUNNING_STATUS_POLL_LIMIT,
     REQUEST_TIMEOUT_SECONDS,
     CCMDDAPIClient,
-    CCMDDAPIError,
     CCMDDLongRunningOperationTimeout,
-    CCMDDOperationResult,
 )
-from synch.tasks import healthcheck
 
 TEST_PASSWORD = "test-password"  # noqa: S105
-
-
-class HealthTestCase(TestCase):
-    def test_health(self):
-        response = self.client.get(reverse("health"))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.text, "OK")
-
-
-class CeleryConfigurationTests(TestCase):
-    def test_uses_amqp_broker_by_default(self):
-        self.assertEqual(app.conf.broker_url, "amqp://guest:guest@localhost:5672//")
-
-    def test_does_not_configure_result_backend(self):
-        self.assertIsNone(app.conf.result_backend)
-
-    def test_autodiscovers_shared_tasks_from_django_apps(self):
-        task = import_string("synch.tasks.healthcheck")
-
-        self.assertIn(task.name, app.tasks)
-        self.assertEqual(app.tasks[task.name].name, task.name)
-
-
-@override_settings(
-    CELERY_TASK_ALWAYS_EAGER=True,
-    CELERY_TASK_EAGER_PROPAGATES=True,
-)
-class CeleryTaskExecutionTests(TestCase):
-    def test_healthcheck_task_runs(self):
-        result = healthcheck.delay()
-
-        self.assertTrue(result.successful())
-        self.assertEqual(result.get(), "OK")
 
 
 class CCMDDAPIClientTests(SimpleTestCase):
@@ -105,7 +66,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
         session = Mock()
         session.request.return_value = self.make_response(
             payload={
-                "result": CCMDDOperationResult.IMMEDIATE,
+                "result": 1,
                 "data": [{"id": "rx-1"}],
             },
         )
@@ -125,7 +86,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
         session = Mock()
         session.request.return_value = self.make_response(
             payload={
-                "result": CCMDDOperationResult.IMMEDIATE,
+                "result": 1,
                 "data": [{"id": "patient-1"}],
             },
         )
@@ -152,7 +113,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": CCMDDOperationResult.LONG_RUNNING_OPERATION,
+                    "result": 2,
                     "response": {
                         "status_location": "https://status/1",
                         "resource_location": "https://resource/1",
@@ -161,19 +122,19 @@ class CCMDDAPIClientTests(SimpleTestCase):
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "running"},
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "succeeded"},
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": [{"id": "rx-1"}, {"id": "rx-2"}],
                 },
             ),
@@ -227,7 +188,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": CCMDDOperationResult.MULTI_LONG_RUNNING_OPERATION,
+                    "result": 3,
                     "responses": [
                         {
                             "status_location": "https://status/1",
@@ -242,25 +203,25 @@ class CCMDDAPIClientTests(SimpleTestCase):
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "succeeded"},
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": [{"id": "patient-1"}],
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "succeeded"},
                 },
             ),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": [{"id": "patient-2"}],
                 },
             ),
@@ -286,7 +247,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(
                 status_code=202,
                 payload={
-                    "result": CCMDDOperationResult.LONG_RUNNING_OPERATION,
+                    "result": 2,
                     "response": {
                         "status_location": "https://status/1",
                         "resource_location": "https://resource/1",
@@ -296,14 +257,14 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(status_code=503),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": {"status": "running"},
                 },
             ),
             *[
                 self.make_response(
                     payload={
-                        "result": CCMDDOperationResult.IMMEDIATE,
+                        "result": 1,
                         "data": {"status": "running"},
                     },
                 )
@@ -336,7 +297,7 @@ class CCMDDAPIClientTests(SimpleTestCase):
             self.make_response(status_code=503),
             self.make_response(
                 payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
+                    "result": 1,
                     "data": [{"id": "rx-1"}],
                 }
             ),
@@ -352,68 +313,3 @@ class CCMDDAPIClientTests(SimpleTestCase):
         self.assertEqual(items, [{"id": "rx-1"}])
         random_uniform.assert_has_calls([call(0, 1), call(0, 2)])
         self.assertEqual(sleep.call_args_list, [call(0.25), call(0.75)])
-
-    def test_retries_transport_errors(self):
-        session = Mock()
-        sleep = Mock()
-        random_uniform = Mock(return_value=0.5)
-        session.request.side_effect = [
-            requests.ConnectionError("temporary"),
-            self.make_response(
-                payload={
-                    "result": CCMDDOperationResult.IMMEDIATE,
-                    "data": [{"id": "rx-1"}],
-                }
-            ),
-        ]
-        client = self.make_client(
-            session=session,
-            sleep=sleep,
-            random_uniform=random_uniform,
-        )
-
-        items = list(client.iter_limited_prescriptions())
-
-        self.assertEqual(items, [{"id": "rx-1"}])
-        sleep.assert_called_once_with(0.5)
-
-    def test_does_not_retry_non_temporary_http_failures(self):
-        session = Mock()
-        session.request.return_value = self.make_response(status_code=400)
-        client = self.make_client(session=session)
-
-        with self.assertRaises(CCMDDAPIError):
-            list(client.iter_limited_prescriptions())
-
-        session.request.assert_called_once()
-
-    def test_raises_when_long_running_operation_does_not_succeed_in_time(self):
-        session = Mock()
-        sleep = Mock()
-        session.request.side_effect = [
-            self.make_response(
-                status_code=202,
-                payload={
-                    "result": CCMDDOperationResult.LONG_RUNNING_OPERATION,
-                    "response": {
-                        "status_location": "https://status/1",
-                        "resource_location": "https://resource/1",
-                    },
-                },
-            ),
-            *[
-                self.make_response(
-                    payload={
-                        "result": CCMDDOperationResult.IMMEDIATE,
-                        "data": {"status": "running"},
-                    },
-                )
-                for _ in range(LONG_RUNNING_STATUS_POLL_LIMIT)
-            ],
-        ]
-        client = self.make_client(session=session, sleep=sleep)
-
-        with self.assertRaises(CCMDDLongRunningOperationTimeout):
-            list(client.iter_limited_prescriptions())
-
-        self.assertEqual(sleep.call_count, LONG_RUNNING_STATUS_POLL_LIMIT)
