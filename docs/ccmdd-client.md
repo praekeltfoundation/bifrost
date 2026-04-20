@@ -1,6 +1,6 @@
 # CCMDD Client
 
-The sync app includes a small HTTP client for the CCMDD API in synch/ccmdd.py
+The sync app includes a small HTTP client for [SyNCH's CCMDD API](https://test.ccmdd.org.za/wapi) in synch/ccmdd.py
 
 ## Scope
 
@@ -28,10 +28,14 @@ client = CCMDDAPIClient(
 Fetch updated prescriptions or patients:
 
 ```python
+from datetime import datetime
+
 for prescription in client.iter_limited_prescriptions():
     ...
 
-for patient in client.iter_limited_patients(date_updated="2024-01-02 03:04:05.000"):
+for patient in client.iter_limited_patients(
+    date_updated=datetime(2024, 1, 2, 3, 4, 5),
+):
     ...
 ```
 
