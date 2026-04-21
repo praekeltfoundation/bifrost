@@ -51,7 +51,7 @@ Start Celery Beat:
 uv run celery -A bifrost beat --loglevel=info
 ```
 
-Celery Beat schedules synchronization once per day at `00:00` UTC. The task acquires a lock before syncing, so only one sync run can proceed at a time even if multiple workers are active.
+Celery Beat schedules CCMDD synchronization once per day at `00:00` UTC. The scheduled task runs patient sync first and prescription sync second under a single top-level lock, so only one full CCMDD sync run can proceed at a time even if multiple workers are active.
 
 Useful local URLs:
 

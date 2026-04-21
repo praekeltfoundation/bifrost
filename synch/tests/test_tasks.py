@@ -9,8 +9,8 @@ from django.utils.module_loading import import_string
 
 from bifrost.celery import app
 from lock.models import Lock
-from synch.models import Patient
-from synch.tasks import healthcheck, sync_patients
+from synch.models import Patient, Prescription
+from synch.tasks import healthcheck, sync_all, sync_patients, sync_prescriptions
 
 TEST_PASSWORD = "test-password"  # noqa: S105
 
@@ -28,11 +28,11 @@ class CeleryConfigurationTests(TestCase):
         self.assertIn(task.name, app.tasks)
         self.assertEqual(app.tasks[task.name].name, task.name)
 
-    def test_configures_daily_patient_sync_schedule(self):
+    def test_configures_daily_sync_schedule(self):
         self.assertEqual(
-            app.conf.beat_schedule["sync-patients"],
+            app.conf.beat_schedule["sync-ccmdd"],
             {
-                "task": "synch.tasks.sync_patients",
+                "task": "synch.tasks.sync_all",
                 "schedule": crontab(minute=0, hour=0),
             },
         )
@@ -48,6 +48,52 @@ class CeleryTaskExecutionTests(TestCase):
 
         self.assertTrue(result.successful())
         self.assertEqual(result.get(), "OK")
+
+    def test_sync_all_runs_patient_sync_before_prescription_sync(self):
+        with (
+            patch("synch.tasks.sync_patients") as sync_patients_mock,
+            patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+        ):
+            result = sync_all.delay()
+
+        self.assertTrue(result.successful())
+        sync_patients_mock.assert_called_once()
+        sync_prescriptions_mock.assert_called_once()
+        self.assertIs(
+            sync_patients_mock.call_args.args[0],
+            sync_prescriptions_mock.call_args.args[0],
+        )
+
+    def test_sync_all_does_not_run_prescriptions_when_patient_sync_fails(self):
+        with (
+            patch("synch.tasks.sync_patients", side_effect=RuntimeError("boom")),
+            patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            self.assertRaisesMessage(RuntimeError, "boom"),
+        ):
+            sync_all.delay()
+
+        sync_prescriptions_mock.assert_not_called()
+
+    def test_sync_all_skips_when_top_level_lock_is_already_held(self):
+        Lock.acquire("sync-ccmdd")
+
+        with (
+            patch("synch.tasks.sync_patients") as sync_patients_mock,
+            patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            self.assertLogs("synch.tasks", level="WARNING") as logs,
+        ):
+            result = sync_all.delay()
+
+        self.assertTrue(result.successful())
+        sync_patients_mock.assert_not_called()
+        sync_prescriptions_mock.assert_not_called()
+        self.assertEqual(
+            logs.output,
+            [
+                "WARNING:synch.tasks:"
+                "Skipping CCMDD sync because lock 'sync-ccmdd' is already held."
+            ],
+        )
 
 
 @override_settings(
@@ -157,21 +203,179 @@ class SyncPatientsTaskTests(TestCase):
         )
         self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 patients."])
 
-    def test_sync_patients_skips_when_lock_is_already_held(self):
-        Lock.acquire("sync-patients")
+
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+    CCMDD_BASE_URL="https://test.ccmdd.org.za",
+    CCMDD_USERNAME="api-user",
+    CCMDD_PASSWORD=TEST_PASSWORD,
+)
+class SyncPrescriptionsTaskTests(TestCase):
+    def test_sync_prescriptions_uses_epoch_date_updated_when_no_prescriptions_exist(
+        self,
+    ):
         client = Mock()
+        client.iter_limited_prescriptions.return_value = iter([])
+
+        with patch("synch.tasks.CCMDDAPIClient", return_value=client):
+            sync_prescriptions.delay()
+
+        client.iter_limited_prescriptions.assert_called_once_with(
+            date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        )
+
+    def test_sync_prescriptions_creates_records_and_strips_modeled_fields_from_payload(
+        self,
+    ):
+        client = Mock()
+        client.iter_limited_prescriptions.return_value = iter(
+            [
+                {
+                    "id": "B2798F40-FA2C-F111-AD54-010101010000",
+                    "date_created": "2026-03-31 14:07:57.167",
+                    "date_updated": "2026-03-31 14:07:57.433",
+                    "facility_id": 937324,
+                    "patient_id": "D905C1E4-1962-E711-9D8C-7C5CF8BA146D",
+                    "patient_phone": "1231231233",
+                    "department_id": 123,
+                    "return_dates": [
+                        {
+                            "return_date": "2026-04-28",
+                            "note": "Testing",
+                            "description": "1 month",
+                            "day_count": 28,
+                        }
+                    ],
+                    "prescription_status_id": 5,
+                    "status_description": "Submitted",
+                }
+            ]
+        )
 
         with (
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
-            self.assertLogs("synch.tasks", level="WARNING") as logs,
+            self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_patients.delay()
+            sync_prescriptions.delay()
 
-        client.iter_limited_patients.assert_not_called()
+        prescription = Prescription.objects.get()
         self.assertEqual(
-            logs.output,
+            prescription.ccmdd_prescription_id,
+            "B2798F40-FA2C-F111-AD54-010101010000",
+        )
+        self.assertEqual(prescription.facility_id, 937324)
+        self.assertEqual(
+            prescription.patient_id,
+            "D905C1E4-1962-E711-9D8C-7C5CF8BA146D",
+        )
+        self.assertEqual(prescription.patient_phone, "1231231233")
+        self.assertEqual(prescription.department_id, 123)
+        self.assertEqual(
+            prescription.return_dates,
             [
-                "WARNING:synch.tasks:"
-                "Skipping patient sync because lock 'sync-patients' is already held."
+                {
+                    "return_date": "2026-04-28",
+                    "note": "Testing",
+                    "description": "1 month",
+                    "day_count": 28,
+                }
             ],
         )
+        self.assertEqual(
+            prescription.payload,
+            {"prescription_status_id": 5, "status_description": "Submitted"},
+        )
+        client.iter_limited_prescriptions.assert_called_once_with(
+            date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        )
+        self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 prescriptions."])
+
+    def test_sync_prescriptions_uses_latest_date_updated_for_incremental_sync(self):
+        Prescription.objects.create(
+            ccmdd_prescription_id="existing-prescription",
+            date_created=datetime(2026, 3, 31, 14, 7, 57, 167000, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 3, 31, 14, 7, 57, 433000, tzinfo=timezone.utc),
+            facility_id=937324,
+            patient_id="existing-patient",
+            patient_phone="1231231233",
+            department_id=123,
+            return_dates=[],
+            payload={"status_description": "Submitted"},
+        )
+        client = Mock()
+        client.iter_limited_prescriptions.return_value = iter([])
+
+        with patch("synch.tasks.CCMDDAPIClient", return_value=client):
+            sync_prescriptions.delay()
+
+        client.iter_limited_prescriptions.assert_called_once_with(
+            date_updated=datetime(2026, 3, 31, 14, 7, 57, 433000, tzinfo=timezone.utc),
+        )
+
+    def test_sync_prescriptions_updates_existing_prescription_by_ccmdd_id(self):
+        Prescription.objects.create(
+            ccmdd_prescription_id="B2798F40-FA2C-F111-AD54-010101010000",
+            date_created=datetime(2026, 3, 31, 14, 7, 57, 167000, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 3, 31, 14, 7, 57, 433000, tzinfo=timezone.utc),
+            facility_id=937324,
+            patient_id="existing-patient",
+            patient_phone="1231231233",
+            department_id=123,
+            return_dates=[],
+            payload={"status_description": "Submitted"},
+        )
+        client = Mock()
+        client.iter_limited_prescriptions.return_value = iter(
+            [
+                {
+                    "id": "B2798F40-FA2C-F111-AD54-010101010000",
+                    "date_created": "2026-03-31 14:07:57.167",
+                    "date_updated": "2026-04-01 09:00:00.000",
+                    "facility_id": 937325,
+                    "patient_id": "updated-patient",
+                    "patient_phone": "9998887777",
+                    "department_id": 456,
+                    "return_dates": [
+                        {
+                            "return_date": "2026-09-17",
+                            "note": "PrEP",
+                            "description": "6 Months",
+                            "day_count": 168,
+                        }
+                    ],
+                    "status_description": "Updated",
+                }
+            ]
+        )
+
+        with (
+            patch("synch.tasks.CCMDDAPIClient", return_value=client),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_prescriptions.delay()
+
+        prescription = Prescription.objects.get(
+            ccmdd_prescription_id="B2798F40-FA2C-F111-AD54-010101010000"
+        )
+        self.assertEqual(prescription.facility_id, 937325)
+        self.assertEqual(prescription.patient_id, "updated-patient")
+        self.assertEqual(prescription.patient_phone, "9998887777")
+        self.assertEqual(prescription.department_id, 456)
+        self.assertEqual(
+            prescription.return_dates,
+            [
+                {
+                    "return_date": "2026-09-17",
+                    "note": "PrEP",
+                    "description": "6 Months",
+                    "day_count": 168,
+                }
+            ],
+        )
+        self.assertEqual(prescription.payload, {"status_description": "Updated"})
+        self.assertEqual(
+            prescription.date_updated,
+            datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 prescriptions."])
