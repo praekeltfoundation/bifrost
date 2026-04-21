@@ -73,5 +73,8 @@ class Facility(models.Model):
         default=dict
     )
 
+    class Meta:
+        verbose_name_plural = "facilities"
+
     def __str__(self) -> str:
         return self.name

@@ -24,6 +24,6 @@ class PrescriptionAdmin(admin.ModelAdmin):
 
 @admin.register(Facility)
 class FacilityAdmin(admin.ModelAdmin):
-    list_display = ("ccmdd_facility_id", "name", "telephone", "address_1", "address_2")
+    list_display = ("ccmdd_facility_id", "name", "telephone")
     search_fields = ("ccmdd_facility_id", "name")
     readonly_fields = ("payload",)
