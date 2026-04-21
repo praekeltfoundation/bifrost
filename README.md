@@ -114,4 +114,5 @@ uv run ./manage.py test
 
 - [Lock app](docs/lock.md)
 - [CCMDD client](docs/ccmdd-client.md)
+- [Turn client](docs/turn-client.md)
 - [Tasks](docs/tasks.md)
