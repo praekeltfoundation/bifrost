@@ -456,7 +456,7 @@ class SyncNewPatientsToTurnTests(TestCase):
             date_updated=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
             facility_id=1,
             patient_id=new_patient.ccmdd_patient_id,
-            patient_phone="1111111111",
+            patient_phone="0820000001",
             department_id=1,
             return_dates=[],
             payload={},
@@ -467,7 +467,7 @@ class SyncNewPatientsToTurnTests(TestCase):
             date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
             facility_id=1,
             patient_id=new_patient.ccmdd_patient_id,
-            patient_phone="2222222222",
+            patient_phone="0820000002",
             department_id=1,
             return_dates=[],
             payload={},
@@ -478,7 +478,7 @@ class SyncNewPatientsToTurnTests(TestCase):
             date_updated=datetime(2026, 4, 2, 2, 0, 0, tzinfo=timezone.utc),
             facility_id=1,
             patient_id="existing-patient",
-            patient_phone="3333333333",
+            patient_phone="0820000003",
             department_id=1,
             return_dates=[],
             payload={},
@@ -500,13 +500,95 @@ class SyncNewPatientsToTurnTests(TestCase):
         turn_client.import_contacts.assert_called_once_with(
             [
                 {
-                    "urn": "2222222222",
+                    "urn": "+27820000002",
                     "synch_new_user": "2026-04-21T10:11:12+00:00",
                 }
             ]
         )
         self.assertEqual(
             logs.output, ["INFO:synch.tasks:Imported 1 new patients to Turn."]
+        )
+
+    def test_sync_new_patients_to_turn_normalizes_phone_to_e164_for_south_africa(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="new-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="082 123 4567",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.now",
+                return_value=datetime(2026, 4, 21, 10, 11, 12, tzinfo=timezone.utc),
+            ),
+        ):
+            sync_new_patients_to_turn(
+                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
+            )
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27821234567",
+                    "synch_new_user": "2026-04-21T10:11:12+00:00",
+                }
+            ]
+        )
+
+    def test_sync_new_patients_to_turn_skips_patients_with_unparseable_phone_numbers(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="new-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="not-a-phone-number",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_new_patients_to_turn(
+                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
+            )
+
+        turn_client.import_contacts.assert_not_called()
+        self.assertEqual(
+            logs.output,
+            [
+                "INFO:synch.tasks:Patient new-patient has an unparseable phone "
+                "number, skipping Turn sync.",
+                "INFO:synch.tasks:Imported 0 new patients to Turn.",
+            ],
         )
 
     def test_sync_new_patients_to_turn_skips_patients_without_prescriptions_or_phone(
@@ -575,7 +657,7 @@ class SyncNewPatientsToTurnTests(TestCase):
             date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
             facility_id=1,
             patient_id=patient.ccmdd_patient_id,
-            patient_phone="2222222222",
+            patient_phone="0820000002",
             department_id=1,
             return_dates=[],
             payload={},

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+import phonenumbers
 from celery import shared_task
 from django.conf import settings
 from django.db.models import Max
@@ -35,6 +36,18 @@ def _get_turn_client() -> TurnAPIClient:
     return TurnAPIClient(
         base_url=settings.TURN_BASE_URL,
         token=settings.TURN_TOKEN,
+    )
+
+
+def _normalize_phone_number(value: str) -> str | None:
+    try:
+        phone_number = phonenumbers.parse(value, "ZA")
+    except phonenumbers.NumberParseException:
+        return None
+
+    return phonenumbers.format_number(
+        phone_number,
+        phonenumbers.PhoneNumberFormat.E164,
     )
 
 
@@ -164,9 +177,19 @@ def sync_new_patients_to_turn(
             )
             continue
 
+        normalized_phone_number = _normalize_phone_number(
+            latest_prescription.patient_phone
+        )
+        if normalized_phone_number is None:
+            logger.info(
+                "Patient %s has an unparseable phone number, skipping Turn sync.",
+                patient.ccmdd_patient_id,
+            )
+            continue
+
         rows.append(
             {
-                "urn": latest_prescription.patient_phone,
+                "urn": normalized_phone_number,
                 "synch_new_user": timestamp,
             }
         )

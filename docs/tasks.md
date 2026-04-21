@@ -48,7 +48,7 @@ It exists as a minimal Celery execution check so the project can verify that:
 
 - It filters `Patient` records to only those with `date_created` later than last sync date.
 - For each qualifying patient, it finds the most recent `Prescription` by `date_created` for the matching `patient_id`.
-- It uses that prescription's `patient_phone` as the Turn `urn`.
-- It skips patients that have no prescriptions or whose latest prescription has a blank `patient_phone`.
+- It normalizes that prescription's `patient_phone` to E.164 with `phonenumbers` before using it as the Turn `urn`, assuming South Africa (`ZA`) when no country code is provided.
+- It skips patients that have no prescriptions, whose latest prescription has a blank `patient_phone`, or whose phone number cannot be parsed well enough to format.
 - It sets `synch_new_user` to a single `timezone.now().isoformat()` value generated once for the batch.
 - It sends the rows through the Turn CSV contacts import API.
