@@ -10,7 +10,13 @@ from django.utils.module_loading import import_string
 from bifrost.celery import app
 from lock.models import Lock
 from synch.models import Patient, Prescription
-from synch.tasks import healthcheck, sync_all, sync_patients, sync_prescriptions
+from synch.tasks import (
+    healthcheck,
+    sync_all,
+    sync_new_patients_to_turn,
+    sync_patients,
+    sync_prescriptions,
+)
 
 TEST_PASSWORD = "test-password"  # noqa: S105
 
@@ -51,14 +57,22 @@ class CeleryTaskExecutionTests(TestCase):
 
     def test_sync_all_runs_patient_sync_before_prescription_sync(self):
         with (
-            patch("synch.tasks.sync_patients") as sync_patients_mock,
+            patch(
+                "synch.tasks.sync_patients",
+                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            ) as sync_patients_mock,
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
         ):
             result = sync_all.delay()
 
         self.assertTrue(result.successful())
         sync_patients_mock.assert_called_once()
         sync_prescriptions_mock.assert_called_once()
+        sync_new_patients_to_turn.assert_called_once_with(
+            datetime(2026, 4, 1, tzinfo=timezone.utc),
+            sync_patients_mock.call_args.args[0],
+        )
         self.assertIs(
             sync_patients_mock.call_args.args[0],
             sync_prescriptions_mock.call_args.args[0],
@@ -68,11 +82,42 @@ class CeleryTaskExecutionTests(TestCase):
         with (
             patch("synch.tasks.sync_patients", side_effect=RuntimeError("boom")),
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
             self.assertRaisesMessage(RuntimeError, "boom"),
         ):
             sync_all.delay()
 
         sync_prescriptions_mock.assert_not_called()
+        sync_new_patients_to_turn.assert_not_called()
+
+    def test_sync_all_does_not_run_turn_sync_when_prescription_sync_fails(self):
+        with (
+            patch(
+                "synch.tasks.sync_patients",
+                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            ),
+            patch("synch.tasks.sync_prescriptions", side_effect=RuntimeError("boom")),
+            patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
+            self.assertRaisesMessage(RuntimeError, "boom"),
+        ):
+            sync_all.delay()
+
+        sync_new_patients_to_turn.assert_not_called()
+
+    def test_sync_all_propagates_turn_sync_errors(self):
+        with (
+            patch(
+                "synch.tasks.sync_patients",
+                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            ),
+            patch("synch.tasks.sync_prescriptions"),
+            patch(
+                "synch.tasks.sync_new_patients_to_turn",
+                side_effect=RuntimeError("boom"),
+            ),
+            self.assertRaisesMessage(RuntimeError, "boom"),
+        ):
+            sync_all.delay()
 
     def test_sync_all_skips_when_top_level_lock_is_already_held(self):
         Lock.acquire("sync-ccmdd")
@@ -80,6 +125,7 @@ class CeleryTaskExecutionTests(TestCase):
         with (
             patch("synch.tasks.sync_patients") as sync_patients_mock,
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
             self.assertLogs("synch.tasks", level="WARNING") as logs,
         ):
             result = sync_all.delay()
@@ -87,6 +133,7 @@ class CeleryTaskExecutionTests(TestCase):
         self.assertTrue(result.successful())
         sync_patients_mock.assert_not_called()
         sync_prescriptions_mock.assert_not_called()
+        sync_new_patients_to_turn.assert_not_called()
         self.assertEqual(
             logs.output,
             [
@@ -379,3 +426,171 @@ class SyncPrescriptionsTaskTests(TestCase):
             datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc),
         )
         self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 prescriptions."])
+
+
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+    TURN_BASE_URL="https://whatsapp.turn.io",
+    TURN_TOKEN=TEST_PASSWORD,
+)
+class SyncNewPatientsToTurnTests(TestCase):
+    def test_sync_new_patients_to_turn_imports_latest_prescription_phone(
+        self,
+    ):
+        Patient.objects.create(
+            ccmdd_patient_id="existing-patient",
+            date_created=datetime(2026, 3, 31, 23, 59, 59, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc),
+            payload={},
+        )
+        new_patient = Patient.objects.create(
+            ccmdd_patient_id="new-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 5, 0, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="old-rx",
+            date_created=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=new_patient.ccmdd_patient_id,
+            patient_phone="1111111111",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="new-rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=new_patient.ccmdd_patient_id,
+            patient_phone="2222222222",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="existing-rx",
+            date_created=datetime(2026, 4, 2, 2, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 2, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id="existing-patient",
+            patient_phone="3333333333",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.now",
+                return_value=datetime(2026, 4, 21, 10, 11, 12, tzinfo=timezone.utc),
+            ),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_new_patients_to_turn(
+                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
+            )
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "2222222222",
+                    "synch_new_user": "2026-04-21T10:11:12+00:00",
+                }
+            ]
+        )
+        self.assertEqual(
+            logs.output, ["INFO:synch.tasks:Imported 1 new patients to Turn."]
+        )
+
+    def test_sync_new_patients_to_turn_skips_patients_without_prescriptions_or_phone(
+        self,
+    ):
+        Patient.objects.create(
+            ccmdd_patient_id="no-prescription",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        blank_phone_patient = Patient.objects.create(
+            ccmdd_patient_id="blank-phone",
+            date_created=datetime(2026, 4, 1, 0, 0, 2, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 2, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="blank-phone-rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=blank_phone_patient.ccmdd_patient_id,
+            patient_phone="",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+
+        with patch("synch.tasks.TurnAPIClient", return_value=turn_client):
+            sync_new_patients_to_turn(
+                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
+            )
+
+        turn_client.import_contacts.assert_not_called()
+
+    def test_sync_new_patients_to_turn_skips_turn_when_no_new_patients(
+        self,
+    ):
+        Patient.objects.create(
+            ccmdd_patient_id="existing-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc),
+            payload={},
+        )
+        turn_client = Mock()
+
+        with patch("synch.tasks.TurnAPIClient", return_value=turn_client):
+            sync_new_patients_to_turn(
+                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
+            )
+
+        turn_client.import_contacts.assert_not_called()
+
+    def test_sync_new_patients_to_turn_propagates_turn_import_errors(self):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="new-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="2222222222",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.side_effect = RuntimeError("boom")
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.now",
+                return_value=datetime(2026, 4, 21, 10, 11, 12, tzinfo=timezone.utc),
+            ),
+            self.assertRaisesMessage(RuntimeError, "boom"),
+        ):
+            sync_new_patients_to_turn(
+                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
+            )
