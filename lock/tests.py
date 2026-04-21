@@ -71,6 +71,29 @@ class LockReleaseTests(TestCase):
 
 
 class LockRefreshTests(TestCase):
+    def test_refresh_is_noop_if_lock_was_updated_less_than_a_minute_ago(self):
+        initial_time = timezone.now()
+        attempted_refresh_time = initial_time + timedelta(seconds=59)
+
+        with patch("lock.models.timezone.now", return_value=initial_time):
+            lock = Lock.acquire(key="daily-sync", owner="worker-1")
+
+        original_expiry = lock.expires_at
+        original_updated_at = lock.updated_at
+
+        with (
+            patch("lock.models.timezone.now", return_value=attempted_refresh_time),
+            patch("lock.models.transaction.atomic") as atomic_mock,
+            patch.object(Lock.objects, "select_for_update") as select_for_update_mock,
+        ):
+            refreshed_lock = lock.refresh()
+
+        self.assertIs(refreshed_lock, lock)
+        self.assertEqual(refreshed_lock.expires_at, original_expiry)
+        self.assertEqual(refreshed_lock.updated_at, original_updated_at)
+        atomic_mock.assert_not_called()
+        select_for_update_mock.assert_not_called()
+
     def test_refresh_extends_expiry_for_active_owner(self):
         initial_time = timezone.now()
         refresh_time = initial_time + timedelta(minutes=5)
@@ -97,7 +120,10 @@ class LockRefreshTests(TestCase):
         with patch("lock.models.timezone.now", return_value=expired_time):
             Lock.acquire(key="daily-sync")
 
-        with self.assertRaises(LockOwnershipError):
+        with (
+            patch("lock.models.timezone.now", return_value=expired_time),
+            self.assertRaises(LockOwnershipError),
+        ):
             lock.refresh()
 
     def test_refresh_reacquires_expired_lock_for_same_owner(self):
@@ -123,5 +149,8 @@ class LockRefreshTests(TestCase):
         with patch("lock.models.timezone.now", return_value=expired_time):
             Lock.acquire(key="daily-sync", owner="worker-2")
 
-        with self.assertRaises(LockOwnershipError):
+        with (
+            patch("lock.models.timezone.now", return_value=expired_time),
+            self.assertRaises(LockOwnershipError),
+        ):
             lock.refresh()

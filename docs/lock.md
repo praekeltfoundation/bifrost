@@ -59,7 +59,8 @@ the database row is still owned by the same `owner` as the instance calling
 
 On success:
 
-- `expires_at` becomes `timezone.now() + lock.ttl`
+- if the lock was updated less than one minute ago, `refresh()` is a no-op
+- otherwise, `expires_at` becomes `timezone.now() + lock.ttl`
 - `updated_at` is updated
 
 Raises `LockOwnershipError` when another owner has taken over the lock.
