@@ -13,6 +13,7 @@ from synch.models import Facility, Patient, Prescription
 from synch.tasks import (
     healthcheck,
     sync_all,
+    sync_appointment_dates_to_turn,
     sync_facilities,
     sync_new_patients_to_turn,
     sync_patients,
@@ -67,6 +68,9 @@ class CeleryTaskExecutionTests(TestCase):
             ) as sync_patients_mock,
             patch("synch.tasks.sync_facilities") as sync_facilities_mock,
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            patch(
+                "synch.tasks.sync_appointment_dates_to_turn"
+            ) as sync_appointment_dates_to_turn_mock,
             patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
         ):
             result = sync_all.delay()
@@ -75,6 +79,9 @@ class CeleryTaskExecutionTests(TestCase):
         sync_patients_mock.assert_called_once()
         sync_facilities_mock.assert_called_once()
         sync_prescriptions_mock.assert_called_once()
+        sync_appointment_dates_to_turn_mock.assert_called_once_with(
+            sync_patients_mock.call_args.args[0]
+        )
         sync_new_patients_to_turn.assert_called_once_with(
             datetime(2026, 4, 1, tzinfo=timezone.utc),
             sync_patients_mock.call_args.args[0],
@@ -87,6 +94,10 @@ class CeleryTaskExecutionTests(TestCase):
             sync_patients_mock.call_args.args[0],
             sync_prescriptions_mock.call_args.args[0],
         )
+        self.assertIs(
+            sync_patients_mock.call_args.args[0],
+            sync_appointment_dates_to_turn_mock.call_args.args[0],
+        )
 
     def test_sync_all_does_not_run_facilities_or_prescriptions_when_patient_sync_fails(
         self,
@@ -95,6 +106,9 @@ class CeleryTaskExecutionTests(TestCase):
             patch("synch.tasks.sync_patients", side_effect=RuntimeError("boom")),
             patch("synch.tasks.sync_facilities") as sync_facilities_mock,
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            patch(
+                "synch.tasks.sync_appointment_dates_to_turn"
+            ) as sync_appointment_dates_to_turn_mock,
             patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
             self.assertRaisesMessage(RuntimeError, "boom"),
         ):
@@ -102,6 +116,7 @@ class CeleryTaskExecutionTests(TestCase):
 
         sync_facilities_mock.assert_not_called()
         sync_prescriptions_mock.assert_not_called()
+        sync_appointment_dates_to_turn_mock.assert_not_called()
         sync_new_patients_to_turn.assert_not_called()
 
     def test_sync_all_does_not_run_prescriptions_when_facility_sync_fails(self):
@@ -112,12 +127,35 @@ class CeleryTaskExecutionTests(TestCase):
             ),
             patch("synch.tasks.sync_facilities", side_effect=RuntimeError("boom")),
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            patch(
+                "synch.tasks.sync_appointment_dates_to_turn"
+            ) as sync_appointment_dates_to_turn_mock,
             patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
             self.assertRaisesMessage(RuntimeError, "boom"),
         ):
             sync_all.delay()
 
         sync_prescriptions_mock.assert_not_called()
+        sync_appointment_dates_to_turn_mock.assert_not_called()
+        sync_new_patients_to_turn.assert_not_called()
+
+    def test_sync_all_does_not_run_turn_tasks_when_prescription_sync_fails(self):
+        with (
+            patch(
+                "synch.tasks.sync_patients",
+                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            ),
+            patch("synch.tasks.sync_facilities"),
+            patch("synch.tasks.sync_prescriptions", side_effect=RuntimeError("boom")),
+            patch(
+                "synch.tasks.sync_appointment_dates_to_turn"
+            ) as sync_appointment_dates_to_turn_mock,
+            patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
+            self.assertRaisesMessage(RuntimeError, "boom"),
+        ):
+            sync_all.delay()
+
+        sync_appointment_dates_to_turn_mock.assert_not_called()
         sync_new_patients_to_turn.assert_not_called()
 
     def test_sync_all_does_not_run_turn_sync_when_prescription_sync_fails(self):
@@ -667,6 +705,14 @@ class SyncNewPatientsToTurnTests(TestCase):
             sync_new_patients_to_turn(
                 datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
             )
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27821234567",
+                    "synch_new_user": "2026-04-21T10:11:12+00:00",
+                }
+            ]
+        )
 
         turn_client.import_contacts.assert_called_once_with(
             [
@@ -848,3 +894,220 @@ class SyncNewPatientsToTurnTests(TestCase):
             sync_new_patients_to_turn(
                 datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
             )
+
+
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+    TURN_BASE_URL="https://turn.io",
+    TURN_TOKEN=TEST_PASSWORD,
+)
+class SyncAppointmentDatesToTurnTests(TestCase):
+    def test_sync_appointment_dates_to_turn_imports_next_future_appointment(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-with-appointment",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=123,
+            name="Clinic A",
+            latitude="-26.2041",
+            longitude="28.0473",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-old-phone",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=123,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[
+                {"return_date": "2026-04-30"},
+                {"return_date": "2026-04-21"},
+            ],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-new-phone",
+            date_created=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=999,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[
+                {"return_date": "2026-05-05"},
+                {"return_date": "2026-04-22"},
+            ],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_appointment_dates_to_turn()
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27820000002",
+                    "synch_next_appointment_date": "2026-04-21",
+                    "synch_appointment_facility_name": "Clinic A",
+                    "synch_appointment_facility_latitude": "-26.2041",
+                    "synch_appointment_facility_longitude": "28.0473",
+                }
+            ]
+        )
+        self.assertEqual(
+            logs.output, ["INFO:synch.tasks:Imported 1 appointment updates to Turn."]
+        )
+
+    def test_sync_appointment_dates_to_turn_clears_fields_when_no_upcoming_appointment(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-no-upcoming-appointment",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-past-only",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=123,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[
+                {"return_date": "2026-04-20"},
+                {"return_date": "2026-04-01"},
+            ],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+        ):
+            sync_appointment_dates_to_turn()
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27820000002",
+                    "synch_next_appointment_date": "",
+                    "synch_appointment_facility_name": "",
+                    "synch_appointment_facility_latitude": "",
+                    "synch_appointment_facility_longitude": "",
+                }
+            ]
+        )
+
+    def test_sync_appointment_dates_to_turn_skips_unparseable_phone_numbers(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-bad-phone",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=123,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="bad-phone",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-30"}],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_appointment_dates_to_turn()
+
+        turn_client.import_contacts.assert_not_called()
+        self.assertEqual(
+            logs.output,
+            [
+                "INFO:synch.tasks:Patient patient-bad-phone has an "
+                "unparseable phone number, skipping Turn appointment sync.",
+                "INFO:synch.tasks:Imported 0 appointment updates to Turn.",
+            ],
+        )
+
+    def test_sync_appointment_dates_to_turn_uses_blank_facility_values_when_missing(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-missing-facility",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=999,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-22"}],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+        ):
+            sync_appointment_dates_to_turn()
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27820000002",
+                    "synch_next_appointment_date": "2026-04-22",
+                    "synch_appointment_facility_name": "",
+                    "synch_appointment_facility_latitude": "",
+                    "synch_appointment_facility_longitude": "",
+                }
+            ]
+        )

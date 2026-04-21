@@ -19,7 +19,8 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It runs `sync_patients` first.
 - It runs `sync_facilities` second.
 - It runs `sync_prescriptions` third.
-- It runs `sync_new_patients_to_turn` fourth.
+- It runs `sync_appointment_dates_to_turn` fourth.
+- It runs `sync_new_patients_to_turn` fifth.
 - It only proceeds to the next step if the previous step completed successfully.
 - If it cannot get the top-level lock, it logs a warning and does not attempt any sync or Turn import.
 
@@ -63,5 +64,19 @@ into the local database.
 - It normalizes that prescription's `patient_phone` to E.164 with `phonenumbers` before using it as the Turn `urn`, assuming South Africa (`ZA`) when no country code is provided.
 - It skips patients that have no prescriptions, whose latest prescription has a blank `patient_phone`, or whose phone number cannot be parsed well enough to format.
 - It sets `synch_new_user` to a single `timezone.now().isoformat()` value generated once for the batch.
+- It sends the rows through the Turn CSV contacts import API.
+- It raises an error if Turn reports row-level import errors in the API response.
+
+## `sync_appointment_dates_to_turn`
+
+`synch.tasks.sync_appointment_dates_to_turn` refreshes next-appointment contact fields in Turn for every locally synced patient.
+
+- It iterates all `Patient` records in the local database.
+- For each patient, it fetches all matching `Prescription` records and uses the latest prescription by `date_created` to source the Turn `urn` from `patient_phone`.
+- It normalizes that phone number to E.164 with `phonenumbers`, assuming South Africa (`ZA`) when no country code is provided.
+- It skips patients that have no prescriptions, whose latest prescription has a blank `patient_phone`, or whose phone number cannot be parsed well enough to format.
+- It flattens `return_dates` across all of the patient's prescriptions, keeps only appointment dates on or after `django.utils.timezone.localdate()`, sorts them, and selects the earliest upcoming appointment.
+- It looks up the `Facility` matching the selected appointment's prescription `facility_id` and sends `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` when available.
+- It clears `synch_next_appointment_date`, `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` with empty strings when a patient has no appointment on or after today.
 - It sends the rows through the Turn CSV contacts import API.
 - It raises an error if Turn reports row-level import errors in the API response.
