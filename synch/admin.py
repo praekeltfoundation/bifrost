@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from synch.models import Patient, Prescription
+from synch.models import Facility, Patient, Prescription
 
 
 @admin.register(Patient)
@@ -20,3 +20,10 @@ class PrescriptionAdmin(admin.ModelAdmin):
     )
     search_fields = ("ccmdd_prescription_id", "patient_id")
     readonly_fields = ("return_dates", "payload")
+
+
+@admin.register(Facility)
+class FacilityAdmin(admin.ModelAdmin):
+    list_display = ("ccmdd_facility_id", "name", "telephone")
+    search_fields = ("ccmdd_facility_id", "name")
+    readonly_fields = ("payload",)

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from django.test import TestCase
 
-from synch.models import Patient, Prescription
+from synch.models import Facility, Patient, Prescription
 
 
 class PatientModelTests(TestCase):
@@ -41,3 +41,19 @@ class PrescriptionModelTests(TestCase):
         )
 
         self.assertEqual(str(prescription), prescription.ccmdd_prescription_id)
+
+
+class FacilityModelTests(TestCase):
+    def test_string_representation_uses_facility_name(self):
+        facility = Facility.objects.create(
+            ccmdd_facility_id=110533,
+            name="Addo Clinic",
+            latitude="-33.5422",
+            longitude="25.6908",
+            telephone="0123456789",
+            address_1="Main Road",
+            address_2="Addo",
+            payload={"classification": "Clinic"},
+        )
+
+        self.assertEqual(str(facility), facility.name)

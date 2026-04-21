@@ -8,8 +8,10 @@ The client only supports these CCMDD endpoints:
 
 - `POST /wapi/prescriptionLimited`
 - `POST /wapi/patientLimited`
+- `GET /wapi/facility`
 
-For both endpoints, the only supported filter is the optional `date_updated` field.
+For the limited prescription and patient endpoints, the only supported filter is the
+optional `date_updated` field.
 
 ## Usage
 
@@ -25,7 +27,7 @@ client = CCMDDAPIClient(
 )
 ```
 
-Fetch updated prescriptions or patients:
+Fetch updated prescriptions, patients, or all facilities:
 
 ```python
 from datetime import datetime
@@ -37,13 +39,16 @@ for patient in client.iter_limited_patients(
     date_updated=datetime(2024, 1, 2, 3, 4, 5),
 ):
     ...
+
+for facility in client.iter_facilities():
+    ...
 ```
 
 The methods return iterators of raw item dictionaries from the CCMDD API response.
 
 ## `date_updated`
 
-`date_updated` is optional for both methods.
+`date_updated` is optional for the limited prescription and patient methods.
 
 - If omitted, the request body is empty.
 - If provided, it is formatted as `YYYY-MM-DD HH:MM:SS.SSSSSS`.

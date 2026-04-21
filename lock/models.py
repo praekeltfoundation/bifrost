@@ -17,6 +17,7 @@ class LockOwnershipError(Exception):
 
 class Lock(models.Model):
     DEFAULT_TTL = timedelta(hours=1)
+    MIN_REFRESH_INTERVAL = timedelta(minutes=1)
 
     key: models.CharField[str, str] = models.CharField(max_length=255, unique=True)
     owner: models.CharField[str, str] = models.CharField(max_length=255)
@@ -63,6 +64,9 @@ class Lock(models.Model):
 
     def refresh(self):
         now = timezone.now()
+
+        if now - self.updated_at < self.MIN_REFRESH_INTERVAL:
+            return self
 
         with transaction.atomic():
             lock = type(self).objects.select_for_update().get(pk=self.pk)

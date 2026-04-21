@@ -106,6 +106,26 @@ class CCMDDAPIClientTests(SimpleTestCase):
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
 
+    def test_iter_facilities_gets_all_facilities(self):
+        session = Mock()
+        session.request.return_value = self.make_response(
+            payload={
+                "result": 1,
+                "data": [{"id": 110533}],
+            },
+        )
+        client = self.make_client(session=session)
+
+        items = list(client.iter_facilities())
+
+        self.assertEqual(items, [{"id": 110533}])
+        session.request.assert_called_once_with(
+            method="GET",
+            url="https://test.ccmdd.org.za/wapi/facility",
+            json=None,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+
     def test_iter_limited_prescriptions_waits_for_single_long_running_operation(self):
         session = Mock()
         sleep = Mock()

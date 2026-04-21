@@ -50,3 +50,31 @@ class Prescription(models.Model):
 
     def __str__(self) -> str:
         return self.ccmdd_prescription_id
+
+
+class Facility(models.Model):
+    ccmdd_facility_id: models.IntegerField[int, int] = models.IntegerField(unique=True)
+    name: models.CharField[str, str] = models.CharField(max_length=255)
+    latitude: models.CharField[str, str] = models.CharField(max_length=255, blank=True)
+    longitude: models.CharField[str, str] = models.CharField(max_length=255, blank=True)
+    telephone: models.CharField[str, str] = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+    address_1: models.CharField[str, str] = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+    address_2: models.CharField[str, str] = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+    payload: models.JSONField[dict[str, Any], dict[str, Any]] = models.JSONField(
+        default=dict
+    )
+
+    class Meta:
+        verbose_name_plural = "facilities"
+
+    def __str__(self) -> str:
+        return self.name
