@@ -73,6 +73,14 @@ class CCMDDAPIClient:
             filters=filters,
         )
 
+    def iter_facilities(self) -> Iterator[dict[str, Any]]:
+        response = self._request(
+            method="GET",
+            url=urljoin(self.base_url, "/wapi/facility"),
+            json=None,
+        )
+        yield from response.json()["data"]
+
     def _iter_limited_records(
         self,
         endpoint_path: str,

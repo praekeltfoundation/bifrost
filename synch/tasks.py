@@ -11,7 +11,7 @@ from django.utils import timezone as django_timezone
 
 from lock.models import Lock, LockAcquisitionError
 from synch.ccmdd import CCMDDAPIClient
-from synch.models import Patient, Prescription
+from synch.models import Facility, Patient, Prescription
 from synch.turn import TurnAPIClient, TurnAPIError
 
 CCMDD_SYNC_LOCK_KEY = "sync-ccmdd"
@@ -69,6 +69,7 @@ def sync_all() -> None:
 
     try:
         patient_sync_watermark = sync_patients(lock)
+        sync_facilities(lock)
         sync_prescriptions(lock)
         sync_new_patients_to_turn(patient_sync_watermark, lock)
     finally:
@@ -144,6 +145,39 @@ def sync_prescriptions(lock: Lock | None = None) -> None:
             lock.refresh()
 
     logger.info("Synced %s prescriptions.", synced)
+
+
+@shared_task
+def sync_facilities(lock: Lock | None = None) -> None:
+    client = _get_client()
+
+    synced = 0
+
+    for record in client.iter_facilities():
+        facility_id = record.pop("id")
+        name = record.pop("level_desc_5")
+        latitude = record.pop("latitude", None) or ""
+        longitude = record.pop("longitude", None) or ""
+        telephone = record.pop("telephone", None) or ""
+        address_1 = record.pop("address_1", None) or ""
+        address_2 = record.pop("address_2", None) or ""
+        Facility.objects.update_or_create(
+            ccmdd_facility_id=facility_id,
+            defaults={
+                "name": name,
+                "latitude": latitude,
+                "longitude": longitude,
+                "telephone": telephone,
+                "address_1": address_1,
+                "address_2": address_2,
+                "payload": record,
+            },
+        )
+        synced += 1
+        if lock is not None:
+            lock.refresh()
+
+    logger.info("Synced %s facilities.", synced)
 
 
 @shared_task

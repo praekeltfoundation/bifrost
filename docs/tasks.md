@@ -17,8 +17,9 @@ It exists as a minimal Celery execution check so the project can verify that:
 
 - It acquires the `sync-ccmdd` lock before starting, so only one full CCMDD sync run can proceed at a time.
 - It runs `sync_patients` first.
-- It runs `sync_prescriptions` second.
-- It runs `sync_new_patients_to_turn` third.
+- It runs `sync_facilities` second.
+- It runs `sync_prescriptions` third.
+- It runs `sync_new_patients_to_turn` fourth.
 - It only proceeds to the next step if the previous step completed successfully.
 - If it cannot get the top-level lock, it logs a warning and does not attempt any sync or Turn import.
 
@@ -41,6 +42,17 @@ It exists as a minimal Celery execution check so the project can verify that:
 - For each returned prescription, it stores `id`, `date_created`, `date_updated`, `facility_id`, `patient_id`, `patient_phone`, `department_id`, and `return_dates` in explicit model fields.
 - It stores every remaining CCMDD prescription field in the `Prescription.payload` JSON column.
 - If a prescription already exists, it is updated instead of a new one being created.
+
+## `sync_facilities`
+
+`synch.tasks.sync_facilities` synchronizes the full facility list from the CCMDD API
+into the local database.
+
+- It calls `iter_facilities()` to fetch all facilities from the CCMDD API.
+- For each returned facility, it stores `id`, `level_desc_5`, `latitude`,
+  `longitude`, `telephone`, `address_1`, and `address_2` in explicit model fields.
+- It stores every remaining CCMDD facility field in the `Facility.payload` JSON column.
+- If a facility already exists, it is updated instead of a new one being created.
 
 ## `sync_new_patients_to_turn`
 

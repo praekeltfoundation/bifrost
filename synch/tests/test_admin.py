@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.contrib import admin
 from django.test import TestCase
 
-from synch.models import Patient, Prescription
+from synch.models import Facility, Patient, Prescription
 
 
 class PatientAdminTests(TestCase):
@@ -34,3 +34,17 @@ class PrescriptionAdminTests(TestCase):
         self.assertEqual(
             model_admin.search_fields, ("ccmdd_prescription_id", "patient_id")
         )
+
+
+class FacilityAdminTests(TestCase):
+    def test_facility_model_is_registered_in_admin(self):
+        self.assertIn(Facility, admin.site._registry)
+
+    def test_facility_admin_lists_basic_sync_fields(self):
+        model_admin = admin.site._registry[Facility]
+
+        self.assertEqual(
+            model_admin.list_display,
+            ("ccmdd_facility_id", "name", "telephone"),
+        )
+        self.assertEqual(model_admin.search_fields, ("ccmdd_facility_id", "name"))

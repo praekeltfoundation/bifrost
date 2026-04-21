@@ -9,10 +9,11 @@ from django.utils.module_loading import import_string
 
 from bifrost.celery import app
 from lock.models import Lock
-from synch.models import Patient, Prescription
+from synch.models import Facility, Patient, Prescription
 from synch.tasks import (
     healthcheck,
     sync_all,
+    sync_facilities,
     sync_new_patients_to_turn,
     sync_patients,
     sync_prescriptions,
@@ -56,12 +57,15 @@ class CeleryTaskExecutionTests(TestCase):
         self.assertTrue(result.successful())
         self.assertEqual(result.get(), "OK")
 
-    def test_sync_all_runs_patient_sync_before_prescription_sync(self):
+    def test_sync_all_runs_patient_sync_before_facility_sync_before_prescription_sync(
+        self,
+    ):
         with (
             patch(
                 "synch.tasks.sync_patients",
                 return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
             ) as sync_patients_mock,
+            patch("synch.tasks.sync_facilities") as sync_facilities_mock,
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
             patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
         ):
@@ -69,6 +73,7 @@ class CeleryTaskExecutionTests(TestCase):
 
         self.assertTrue(result.successful())
         sync_patients_mock.assert_called_once()
+        sync_facilities_mock.assert_called_once()
         sync_prescriptions_mock.assert_called_once()
         sync_new_patients_to_turn.assert_called_once_with(
             datetime(2026, 4, 1, tzinfo=timezone.utc),
@@ -76,12 +81,36 @@ class CeleryTaskExecutionTests(TestCase):
         )
         self.assertIs(
             sync_patients_mock.call_args.args[0],
+            sync_facilities_mock.call_args.args[0],
+        )
+        self.assertIs(
+            sync_patients_mock.call_args.args[0],
             sync_prescriptions_mock.call_args.args[0],
         )
 
-    def test_sync_all_does_not_run_prescriptions_when_patient_sync_fails(self):
+    def test_sync_all_does_not_run_facilities_or_prescriptions_when_patient_sync_fails(
+        self,
+    ):
         with (
             patch("synch.tasks.sync_patients", side_effect=RuntimeError("boom")),
+            patch("synch.tasks.sync_facilities") as sync_facilities_mock,
+            patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
+            self.assertRaisesMessage(RuntimeError, "boom"),
+        ):
+            sync_all.delay()
+
+        sync_facilities_mock.assert_not_called()
+        sync_prescriptions_mock.assert_not_called()
+        sync_new_patients_to_turn.assert_not_called()
+
+    def test_sync_all_does_not_run_prescriptions_when_facility_sync_fails(self):
+        with (
+            patch(
+                "synch.tasks.sync_patients",
+                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            ),
+            patch("synch.tasks.sync_facilities", side_effect=RuntimeError("boom")),
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
             patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
             self.assertRaisesMessage(RuntimeError, "boom"),
@@ -97,6 +126,7 @@ class CeleryTaskExecutionTests(TestCase):
                 "synch.tasks.sync_patients",
                 return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
             ),
+            patch("synch.tasks.sync_facilities"),
             patch("synch.tasks.sync_prescriptions", side_effect=RuntimeError("boom")),
             patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
             self.assertRaisesMessage(RuntimeError, "boom"),
@@ -111,6 +141,7 @@ class CeleryTaskExecutionTests(TestCase):
                 "synch.tasks.sync_patients",
                 return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
             ),
+            patch("synch.tasks.sync_facilities"),
             patch("synch.tasks.sync_prescriptions"),
             patch(
                 "synch.tasks.sync_new_patients_to_turn",
@@ -125,6 +156,7 @@ class CeleryTaskExecutionTests(TestCase):
 
         with (
             patch("synch.tasks.sync_patients") as sync_patients_mock,
+            patch("synch.tasks.sync_facilities") as sync_facilities_mock,
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
             patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
             self.assertLogs("synch.tasks", level="WARNING") as logs,
@@ -133,6 +165,7 @@ class CeleryTaskExecutionTests(TestCase):
 
         self.assertTrue(result.successful())
         sync_patients_mock.assert_not_called()
+        sync_facilities_mock.assert_not_called()
         sync_prescriptions_mock.assert_not_called()
         sync_new_patients_to_turn.assert_not_called()
         self.assertEqual(
@@ -427,6 +460,96 @@ class SyncPrescriptionsTaskTests(TestCase):
             datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc),
         )
         self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 prescriptions."])
+
+
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+    CCMDD_BASE_URL="https://test.ccmdd.org.za",
+    CCMDD_USERNAME="api-user",
+    CCMDD_PASSWORD=TEST_PASSWORD,
+)
+class SyncFacilitiesTaskTests(TestCase):
+    def test_sync_facilities_creates_records_and_strips_modeled_fields_from_payload(
+        self,
+    ):
+        client = Mock()
+        client.iter_facilities.return_value = iter(
+            [
+                {
+                    "id": 110533,
+                    "level_desc_5": "Addo Clinic",
+                    "latitude": "-33.5422",
+                    "longitude": "25.6908",
+                    "telephone": "0421234567",
+                    "address_1": "Main Road",
+                    "address_2": "Addo",
+                    "classification": "Clinic",
+                    "active": 1,
+                }
+            ]
+        )
+
+        with (
+            patch("synch.tasks.CCMDDAPIClient", return_value=client),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_facilities.delay()
+
+        facility = Facility.objects.get()
+        self.assertEqual(facility.ccmdd_facility_id, 110533)
+        self.assertEqual(facility.name, "Addo Clinic")
+        self.assertEqual(facility.latitude, "-33.5422")
+        self.assertEqual(facility.longitude, "25.6908")
+        self.assertEqual(facility.telephone, "0421234567")
+        self.assertEqual(facility.address_1, "Main Road")
+        self.assertEqual(facility.address_2, "Addo")
+        self.assertEqual(facility.payload, {"classification": "Clinic", "active": 1})
+        client.iter_facilities.assert_called_once_with()
+        self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 facilities."])
+
+    def test_sync_facilities_updates_existing_facility_by_ccmdd_id(self):
+        Facility.objects.create(
+            ccmdd_facility_id=110533,
+            name="Old Addo Clinic",
+            latitude="-33.5000",
+            longitude="25.6000",
+            telephone="0000000000",
+            address_1="Old Address",
+            address_2="Old Suburb",
+            payload={"classification": "Old"},
+        )
+        client = Mock()
+        client.iter_facilities.return_value = iter(
+            [
+                {
+                    "id": 110533,
+                    "level_desc_5": "Addo Clinic",
+                    "latitude": "-33.5422",
+                    "longitude": "25.6908",
+                    "telephone": "0421234567",
+                    "address_1": "Main Road",
+                    "address_2": "Addo",
+                    "classification": "Clinic",
+                }
+            ]
+        )
+
+        with (
+            patch("synch.tasks.CCMDDAPIClient", return_value=client),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_facilities.delay()
+
+        facility = Facility.objects.get(ccmdd_facility_id=110533)
+        self.assertEqual(facility.name, "Addo Clinic")
+        self.assertEqual(facility.latitude, "-33.5422")
+        self.assertEqual(facility.longitude, "25.6908")
+        self.assertEqual(facility.telephone, "0421234567")
+        self.assertEqual(facility.address_1, "Main Road")
+        self.assertEqual(facility.address_2, "Addo")
+        self.assertEqual(facility.payload, {"classification": "Clinic"})
+        self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 facilities."])
 
 
 @override_settings(
