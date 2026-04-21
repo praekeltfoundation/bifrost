@@ -17,6 +17,7 @@ from synch.tasks import (
     sync_patients,
     sync_prescriptions,
 )
+from synch.turn import TurnAPIError
 
 TEST_PASSWORD = "test-password"  # noqa: S105
 
@@ -484,6 +485,7 @@ class SyncNewPatientsToTurnTests(TestCase):
             payload={},
         )
         turn_client = Mock()
+        turn_client.import_contacts.return_value = []
 
         with (
             patch("synch.tasks.TurnAPIClient", return_value=turn_client),
@@ -530,6 +532,7 @@ class SyncNewPatientsToTurnTests(TestCase):
             payload={},
         )
         turn_client = Mock()
+        turn_client.import_contacts.return_value = []
 
         with (
             patch("synch.tasks.TurnAPIClient", return_value=turn_client),
@@ -572,6 +575,7 @@ class SyncNewPatientsToTurnTests(TestCase):
             payload={},
         )
         turn_client = Mock()
+        turn_client.import_contacts.return_value = []
 
         with (
             patch("synch.tasks.TurnAPIClient", return_value=turn_client),
@@ -672,6 +676,51 @@ class SyncNewPatientsToTurnTests(TestCase):
                 return_value=datetime(2026, 4, 21, 10, 11, 12, tzinfo=timezone.utc),
             ),
             self.assertRaisesMessage(RuntimeError, "boom"),
+        ):
+            sync_new_patients_to_turn(
+                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
+            )
+
+    def test_sync_new_patients_to_turn_raises_when_turn_returns_row_errors(self):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="new-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = [
+            {
+                "urn": "+27820000002",
+                "synch_new_user": "2026-04-21T10:11:12+00:00",
+                "error": "ERROR: duplicate contact",
+            }
+        ]
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.now",
+                return_value=datetime(2026, 4, 21, 10, 11, 12, tzinfo=timezone.utc),
+            ),
+            self.assertRaisesMessage(
+                TurnAPIError,
+                "Turn returned import errors for 1 contact row(s): "
+                "[{'urn': '+27820000002', 'synch_new_user': "
+                "'2026-04-21T10:11:12+00:00', 'error': "
+                "'ERROR: duplicate contact'}]",
+            ),
         ):
             sync_new_patients_to_turn(
                 datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)

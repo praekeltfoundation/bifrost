@@ -52,3 +52,4 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It skips patients that have no prescriptions, whose latest prescription has a blank `patient_phone`, or whose phone number cannot be parsed well enough to format.
 - It sets `synch_new_user` to a single `timezone.now().isoformat()` value generated once for the batch.
 - It sends the rows through the Turn CSV contacts import API.
+- It raises an error if Turn reports row-level import errors in the API response.

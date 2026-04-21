@@ -12,7 +12,7 @@ from django.utils import timezone as django_timezone
 from lock.models import Lock, LockAcquisitionError
 from synch.ccmdd import CCMDDAPIClient
 from synch.models import Patient, Prescription
-from synch.turn import TurnAPIClient
+from synch.turn import TurnAPIClient, TurnAPIError
 
 CCMDD_SYNC_LOCK_KEY = "sync-ccmdd"
 CCMDD_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
@@ -200,5 +200,10 @@ def sync_new_patients_to_turn(
         logger.info("Imported 0 new patients to Turn.")
         return
 
-    _get_turn_client().import_contacts(rows)
+    errors = _get_turn_client().import_contacts(rows)
+    if errors:
+        raise TurnAPIError(
+            f"Turn returned import errors for {len(errors)} contact row(s): {errors!r}"
+        )
+
     logger.info("Imported %s new patients to Turn.", len(rows))
