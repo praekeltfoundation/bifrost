@@ -3,13 +3,16 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+import phonenumbers
 from celery import shared_task
 from django.conf import settings
 from django.db.models import Max
+from django.utils import timezone as django_timezone
 
 from lock.models import Lock, LockAcquisitionError
 from synch.ccmdd import CCMDDAPIClient
 from synch.models import Patient, Prescription
+from synch.turn import TurnAPIClient, TurnAPIError
 
 CCMDD_SYNC_LOCK_KEY = "sync-ccmdd"
 CCMDD_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
@@ -26,6 +29,25 @@ def _get_client() -> CCMDDAPIClient:
         base_url=settings.CCMDD_BASE_URL,
         username=settings.CCMDD_USERNAME,
         password=settings.CCMDD_PASSWORD,
+    )
+
+
+def _get_turn_client() -> TurnAPIClient:
+    return TurnAPIClient(
+        base_url=settings.TURN_BASE_URL,
+        token=settings.TURN_TOKEN,
+    )
+
+
+def _normalize_phone_number(value: str) -> str | None:
+    try:
+        phone_number = phonenumbers.parse(value, "ZA")
+    except phonenumbers.NumberParseException:
+        return None
+
+    return phonenumbers.format_number(
+        phone_number,
+        phonenumbers.PhoneNumberFormat.E164,
     )
 
 
@@ -46,14 +68,15 @@ def sync_all() -> None:
         return
 
     try:
-        sync_patients(lock)
+        patient_sync_watermark = sync_patients(lock)
         sync_prescriptions(lock)
+        sync_new_patients_to_turn(patient_sync_watermark, lock)
     finally:
         lock.release()
 
 
 @shared_task
-def sync_patients(lock: Lock | None = None) -> None:
+def sync_patients(lock: Lock | None = None) -> datetime:
     latest_date_updated = Patient.objects.aggregate(
         latest_date_updated=Max("date_updated")
     )["latest_date_updated"]
@@ -80,6 +103,7 @@ def sync_patients(lock: Lock | None = None) -> None:
             lock.refresh()
 
     logger.info("Synced %s patients.", synced)
+    return latest_date_updated
 
 
 @shared_task
@@ -120,3 +144,66 @@ def sync_prescriptions(lock: Lock | None = None) -> None:
             lock.refresh()
 
     logger.info("Synced %s prescriptions.", synced)
+
+
+@shared_task
+def sync_new_patients_to_turn(
+    patient_sync_watermark: datetime,
+    lock: Lock | None = None,
+) -> None:
+    new_patients = Patient.objects.filter(date_created__gt=patient_sync_watermark).only(
+        "ccmdd_patient_id"
+    )
+
+    timestamp = django_timezone.now().isoformat()
+    rows: list[dict[str, object]] = []
+
+    for patient in new_patients:
+        try:
+            latest_prescription = Prescription.objects.filter(
+                patient_id=patient.ccmdd_patient_id
+            ).latest("date_created")
+        except Prescription.DoesNotExist:
+            logger.info(
+                "No prescriptions found for patient %s, skipping Turn sync.",
+                patient.ccmdd_patient_id,
+            )
+            continue
+
+        if not latest_prescription.patient_phone:
+            logger.info(
+                "Patient %s does not have a phone number, skipping Turn sync",
+                patient.ccmdd_patient_id,
+            )
+            continue
+
+        normalized_phone_number = _normalize_phone_number(
+            latest_prescription.patient_phone
+        )
+        if normalized_phone_number is None:
+            logger.info(
+                "Patient %s has an unparseable phone number, skipping Turn sync.",
+                patient.ccmdd_patient_id,
+            )
+            continue
+
+        rows.append(
+            {
+                "urn": normalized_phone_number,
+                "synch_new_user": timestamp,
+            }
+        )
+        if lock is not None:
+            lock.refresh()
+
+    if not rows:
+        logger.info("Imported 0 new patients to Turn.")
+        return
+
+    errors = _get_turn_client().import_contacts(rows)
+    if errors:
+        raise TurnAPIError(
+            f"Turn returned import errors for {len(errors)} contact row(s): {errors!r}"
+        )
+
+    logger.info("Imported %s new patients to Turn.", len(rows))

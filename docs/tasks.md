@@ -17,8 +17,10 @@ It exists as a minimal Celery execution check so the project can verify that:
 
 - It acquires the `sync-ccmdd` lock before starting, so only one full CCMDD sync run can proceed at a time.
 - It runs `sync_patients` first.
-- It only runs `sync_prescriptions` if the patient sync completes successfully.
-- If it cannot get the top-level lock, it logs a warning and does not attempt either sync.
+- It runs `sync_prescriptions` second.
+- It runs `sync_new_patients_to_turn` third.
+- It only proceeds to the next step if the previous step completed successfully.
+- If it cannot get the top-level lock, it logs a warning and does not attempt any sync or Turn import.
 
 ## `sync_patients`
 
@@ -28,6 +30,7 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It calls `iter_limited_patients(date_updated=...)` to fetch updates from the CCMDD API.
 - For each returned patient, it stores `id`, `date_created`, and `date_updated` in explicit model fields, and stores the remaining CCMDD patient fields in the `Patient.payload` JSON column.
 - If a patient already exists, it is updated instead of a new one being created.
+- It returns the pre-sync patient `date_updated` watermark so the top-level task can identify which patients were newly created during the run.
 
 ## `sync_prescriptions`
 
@@ -38,3 +41,15 @@ It exists as a minimal Celery execution check so the project can verify that:
 - For each returned prescription, it stores `id`, `date_created`, `date_updated`, `facility_id`, `patient_id`, `patient_phone`, `department_id`, and `return_dates` in explicit model fields.
 - It stores every remaining CCMDD prescription field in the `Prescription.payload` JSON column.
 - If a prescription already exists, it is updated instead of a new one being created.
+
+## `sync_new_patients_to_turn`
+
+`synch.tasks.sync_new_patients_to_turn` imports the `synch_new_user` contact field into Turn for patients created during the current sync run.
+
+- It filters `Patient` records to only those with `date_created` later than last sync date.
+- For each qualifying patient, it finds the most recent `Prescription` by `date_created` for the matching `patient_id`.
+- It normalizes that prescription's `patient_phone` to E.164 with `phonenumbers` before using it as the Turn `urn`, assuming South Africa (`ZA`) when no country code is provided.
+- It skips patients that have no prescriptions, whose latest prescription has a blank `patient_phone`, or whose phone number cannot be parsed well enough to format.
+- It sets `synch_new_user` to a single `timezone.now().isoformat()` value generated once for the batch.
+- It sends the rows through the Turn CSV contacts import API.
+- It raises an error if Turn reports row-level import errors in the API response.

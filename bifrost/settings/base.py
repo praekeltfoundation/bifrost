@@ -148,6 +148,8 @@ CELERY_BEAT_SCHEDULE = {
 CCMDD_BASE_URL = env("CCMDD_BASE_URL", default="")
 CCMDD_USERNAME = env("CCMDD_USERNAME", default="")
 CCMDD_PASSWORD = env("CCMDD_PASSWORD", default="")
+TURN_BASE_URL = env("TURN_BASE_URL", default="")
+TURN_TOKEN = env("TURN_TOKEN", default="")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

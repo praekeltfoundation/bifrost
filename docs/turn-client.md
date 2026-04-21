@@ -36,6 +36,8 @@ errors = client.import_contacts(
 
 The method returns a list of parsed error rows from Turn's streamed CSV response. Successful rows are ignored.
 
+The CCMDD sync task uses this import path to update Turn contacts with `urn` and the `synch_new_user` contact field for newly created patients.
+
 ## Input shape
 
 - The client accepts `list[dict[str, object]]`.

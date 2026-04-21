@@ -37,6 +37,11 @@ Sync uses these CCMDD settings:
 - `CCMDD_USERNAME`
 - `CCMDD_PASSWORD`
 
+The post-sync Turn import uses these settings:
+
+- `TURN_BASE_URL`
+- `TURN_TOKEN`
+
 Sentry is optional. Bifrost only initializes Sentry when `SENTRY_DSN` is set. You can further configure it with `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_SEND_DEFAULT_PII`, `SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_PROFILES_SAMPLE_RATE`, and `SENTRY_DEBUG`.
 
 Start a worker:
@@ -51,7 +56,7 @@ Start Celery Beat:
 uv run celery -A bifrost beat --loglevel=info
 ```
 
-Celery Beat schedules CCMDD synchronization once per day at `00:00` UTC. The scheduled task runs patient sync first and prescription sync second under a single top-level lock, so only one full CCMDD sync run can proceed at a time even if multiple workers are active.
+Celery Beat schedules CCMDD synchronization once per day at `00:00` UTC. The scheduled task runs patient sync first, prescription sync second, and then imports qualifying new patients into Turn under a single top-level lock, so only one full CCMDD sync run can proceed at a time even if multiple workers are active. If the Turn import fails, the full sync task fails.
 
 Useful local URLs:
 
