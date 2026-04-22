@@ -56,7 +56,7 @@ Start Celery Beat:
 uv run celery -A bifrost beat --loglevel=info
 ```
 
-Celery Beat schedules CCMDD synchronization once per day at `00:00` UTC. The scheduled task runs patient sync first, facility sync second, prescription sync third, and then imports qualifying new patients into Turn under a single top-level lock, so only one full CCMDD sync run can proceed at a time even if multiple workers are active. If the Turn import fails, the full sync task fails.
+Celery Beat schedules CCMDD synchronization once per day at `00:00` UTC. The scheduled task runs patient sync first, facility sync second, prescription sync third, refreshes next-appointment contact fields in Turn for all patients, and then imports qualifying new patients into Turn under a single top-level lock, so only one full CCMDD sync run can proceed at a time even if multiple workers are active. If either Turn import step fails, the full sync task fails.
 
 Useful local URLs:
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import phonenumbers
 from celery import shared_task
@@ -51,6 +51,37 @@ def _normalize_phone_number(value: str) -> str | None:
     )
 
 
+def _parse_return_date(value: object) -> date | None:
+    if not isinstance(value, str):
+        return None
+
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _get_next_appointment(
+    prescriptions: list[Prescription],
+    today: date,
+) -> tuple[date, Prescription] | None:
+    candidates: list[tuple[date, Prescription]] = []
+
+    for prescription in prescriptions:
+        for return_date in prescription.return_dates:
+            if not isinstance(return_date, dict):
+                continue
+            appointment_date = _parse_return_date(return_date.get("return_date"))
+            if appointment_date is None or appointment_date < today:
+                continue
+            candidates.append((appointment_date, prescription))
+
+    if not candidates:
+        return None
+
+    return min(candidates, key=lambda candidate: candidate[0])
+
+
 @shared_task
 def healthcheck():
     return "OK"
@@ -71,6 +102,7 @@ def sync_all() -> None:
         patient_sync_watermark = sync_patients(lock)
         sync_facilities(lock)
         sync_prescriptions(lock)
+        sync_appointment_dates_to_turn(lock)
         sync_new_patients_to_turn(patient_sync_watermark, lock)
     finally:
         lock.release()
@@ -241,3 +273,82 @@ def sync_new_patients_to_turn(
         )
 
     logger.info("Imported %s new patients to Turn.", len(rows))
+
+
+@shared_task
+def sync_appointment_dates_to_turn(lock: Lock | None = None) -> None:
+    today = django_timezone.localdate()
+    rows: list[dict[str, object]] = []
+
+    for patient in Patient.objects.only("ccmdd_patient_id").iterator():
+        prescriptions = list(
+            Prescription.objects.filter(patient_id=patient.ccmdd_patient_id).order_by(
+                "date_created"
+            )
+        )
+        if not prescriptions:
+            logger.info(
+                "No prescriptions found for patient %s, "
+                "skipping Turn appointment sync.",
+                patient.ccmdd_patient_id,
+            )
+            continue
+
+        latest_prescription = prescriptions[-1]
+        if not latest_prescription.patient_phone:
+            logger.info(
+                "Patient %s does not have a phone number, "
+                "skipping Turn appointment sync.",
+                patient.ccmdd_patient_id,
+            )
+            continue
+
+        normalized_phone_number = _normalize_phone_number(
+            latest_prescription.patient_phone
+        )
+        if normalized_phone_number is None:
+            logger.info(
+                "Patient %s has an unparseable phone number, "
+                "skipping Turn appointment sync.",
+                patient.ccmdd_patient_id,
+            )
+            continue
+
+        next_appointment = _get_next_appointment(prescriptions, today)
+        row: dict[str, object] = {
+            "urn": normalized_phone_number,
+            "synch_next_appointment_date": "",
+            "synch_appointment_facility_name": "",
+            "synch_appointment_facility_latitude": "",
+            "synch_appointment_facility_longitude": "",
+        }
+
+        if next_appointment is not None:
+            appointment_date, prescription = next_appointment
+            facility = None
+            if prescription.facility_id is not None:
+                facility = Facility.objects.filter(
+                    ccmdd_facility_id=prescription.facility_id
+                ).first()
+
+            row["synch_next_appointment_date"] = appointment_date.isoformat()
+            if facility is not None:
+                row["synch_appointment_facility_name"] = facility.name or ""
+                row["synch_appointment_facility_latitude"] = facility.latitude or ""
+                row["synch_appointment_facility_longitude"] = facility.longitude or ""
+
+        rows.append(row)
+        if lock is not None:
+            lock.refresh()
+
+    if not rows:
+        logger.info("Imported 0 appointment updates to Turn.")
+        return
+
+    errors = _get_turn_client().import_contacts(rows)
+    if errors:
+        raise TurnAPIError(
+            f"Turn returned import errors for {len(errors)} contact row(s): {errors!r}"
+        )
+
+    logger.info("Imported %s appointment updates to Turn.", len(rows))
