@@ -15,6 +15,7 @@ It exists as a minimal Celery execution check so the project can verify that:
 
 `synch.tasks.sync_all` is the scheduled top-level task for CCMDD synchronization.
 
+- Celery Beat schedules it to run every 5 minutes.
 - It acquires the `sync-ccmdd` lock before starting, so only one full CCMDD sync run can proceed at a time.
 - It runs `sync_patients` first.
 - It runs `sync_facilities` second.

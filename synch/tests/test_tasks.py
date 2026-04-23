@@ -37,12 +37,12 @@ class CeleryConfigurationTests(TestCase):
         self.assertIn(task.name, app.tasks)
         self.assertEqual(app.tasks[task.name].name, task.name)
 
-    def test_configures_daily_sync_schedule(self):
+    def test_configures_five_minute_sync_schedule(self):
         self.assertEqual(
             app.conf.beat_schedule["sync-ccmdd"],
             {
                 "task": "synch.tasks.sync_all",
-                "schedule": crontab(minute=0, hour=0),
+                "schedule": crontab(minute="*/5"),
             },
         )
 
