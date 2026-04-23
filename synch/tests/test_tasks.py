@@ -189,6 +189,58 @@ class CeleryTaskExecutionTests(TestCase):
         ):
             sync_all.delay()
 
+    def test_sync_all_rolls_back_database_updates_when_a_later_step_fails(self):
+        def create_patient(lock: Lock) -> datetime:
+            Patient.objects.create(
+                ccmdd_patient_id="patient-1",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                payload={},
+            )
+            return datetime(2026, 4, 1, tzinfo=timezone.utc)
+
+        def create_facility(lock: Lock) -> None:
+            Facility.objects.create(
+                ccmdd_facility_id=1,
+                name="Clinic",
+                latitude="",
+                longitude="",
+                telephone="",
+                address_1="",
+                address_2="",
+                payload={},
+            )
+
+        def create_prescription(lock: Lock) -> None:
+            Prescription.objects.create(
+                ccmdd_prescription_id="prescription-1",
+                patient_id="patient-1",
+                patient_phone="27820000000",
+                facility_id=1,
+                department_id=1,
+                return_dates=[],
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                payload={},
+            )
+
+        with (
+            patch("synch.tasks.sync_patients", side_effect=create_patient),
+            patch("synch.tasks.sync_facilities", side_effect=create_facility),
+            patch("synch.tasks.sync_prescriptions", side_effect=create_prescription),
+            patch("synch.tasks.sync_appointment_dates_to_turn"),
+            patch(
+                "synch.tasks.sync_new_patients_to_turn",
+                side_effect=RuntimeError("boom"),
+            ),
+            self.assertRaisesMessage(RuntimeError, "boom"),
+        ):
+            sync_all.delay()
+
+        self.assertFalse(Patient.objects.exists())
+        self.assertFalse(Facility.objects.exists())
+        self.assertFalse(Prescription.objects.exists())
+
     def test_sync_all_skips_when_top_level_lock_is_already_held(self):
         Lock.acquire("sync-ccmdd")
 

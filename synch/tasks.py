@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 import phonenumbers
 from celery import shared_task
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone as django_timezone
 
@@ -99,11 +100,12 @@ def sync_all() -> None:
         return
 
     try:
-        patient_sync_watermark = sync_patients(lock)
-        sync_facilities(lock)
-        sync_prescriptions(lock)
-        sync_appointment_dates_to_turn(lock)
-        sync_new_patients_to_turn(patient_sync_watermark, lock)
+        with transaction.atomic():
+            patient_sync_watermark = sync_patients(lock)
+            sync_facilities(lock)
+            sync_prescriptions(lock)
+            sync_appointment_dates_to_turn(lock)
+            sync_new_patients_to_turn(patient_sync_watermark, lock)
     finally:
         lock.release()
 

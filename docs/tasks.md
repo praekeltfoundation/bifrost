@@ -23,6 +23,7 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It runs `sync_appointment_dates_to_turn` fourth.
 - It runs `sync_new_patients_to_turn` fifth.
 - It only proceeds to the next step if the previous step completed successfully.
+- It wraps the sync steps in a database transaction, so a failure in any step rolls back the local database updates made during that run.
 - If it cannot get the top-level lock, it logs a warning and does not attempt any sync or Turn import.
 
 ## `sync_patients`
