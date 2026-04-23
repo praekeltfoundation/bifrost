@@ -15,6 +15,7 @@ It exists as a minimal Celery execution check so the project can verify that:
 
 `synch.tasks.sync_all` is the scheduled top-level task for CCMDD synchronization.
 
+- Celery Beat schedules it to run every 5 minutes.
 - It acquires the `sync-ccmdd` lock before starting, so only one full CCMDD sync run can proceed at a time.
 - It runs `sync_patients` first.
 - It runs `sync_facilities` second.
@@ -22,6 +23,7 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It runs `sync_appointment_dates_to_turn` fourth.
 - It runs `sync_new_patients_to_turn` fifth.
 - It only proceeds to the next step if the previous step completed successfully.
+- It wraps the sync steps in a database transaction, so a failure in any step rolls back the local database updates made during that run.
 - If it cannot get the top-level lock, it logs a warning and does not attempt any sync or Turn import.
 
 ## `sync_patients`
@@ -53,7 +55,8 @@ into the local database.
 - For each returned facility, it stores `id`, `level_desc_5`, `latitude`,
   `longitude`, `telephone`, `address_1`, and `address_2` in explicit model fields.
 - It stores every remaining CCMDD facility field in the `Facility.payload` JSON column.
-- If a facility already exists, it is updated instead of a new one being created.
+- It bulk upserts the full facility list so existing facilities are updated and new
+  facilities are created in one database write.
 
 ## `sync_new_patients_to_turn`
 

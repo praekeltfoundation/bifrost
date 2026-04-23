@@ -141,7 +141,7 @@ CELERY_TASK_IGNORE_RESULT = True
 CELERY_BEAT_SCHEDULE = {
     "sync-ccmdd": {
         "task": "synch.tasks.sync_all",
-        "schedule": crontab(minute=0, hour=0),
+        "schedule": crontab(minute="*/5"),
     }
 }
 

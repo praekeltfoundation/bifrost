@@ -37,12 +37,12 @@ class CeleryConfigurationTests(TestCase):
         self.assertIn(task.name, app.tasks)
         self.assertEqual(app.tasks[task.name].name, task.name)
 
-    def test_configures_daily_sync_schedule(self):
+    def test_configures_five_minute_sync_schedule(self):
         self.assertEqual(
             app.conf.beat_schedule["sync-ccmdd"],
             {
                 "task": "synch.tasks.sync_all",
-                "schedule": crontab(minute=0, hour=0),
+                "schedule": crontab(minute="*/5"),
             },
         )
 
@@ -188,6 +188,58 @@ class CeleryTaskExecutionTests(TestCase):
             self.assertRaisesMessage(RuntimeError, "boom"),
         ):
             sync_all.delay()
+
+    def test_sync_all_rolls_back_database_updates_when_a_later_step_fails(self):
+        def create_patient(lock: Lock) -> datetime:
+            Patient.objects.create(
+                ccmdd_patient_id="patient-1",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                payload={},
+            )
+            return datetime(2026, 4, 1, tzinfo=timezone.utc)
+
+        def create_facility(lock: Lock) -> None:
+            Facility.objects.create(
+                ccmdd_facility_id=1,
+                name="Clinic",
+                latitude="",
+                longitude="",
+                telephone="",
+                address_1="",
+                address_2="",
+                payload={},
+            )
+
+        def create_prescription(lock: Lock) -> None:
+            Prescription.objects.create(
+                ccmdd_prescription_id="prescription-1",
+                patient_id="patient-1",
+                patient_phone="27820000000",
+                facility_id=1,
+                department_id=1,
+                return_dates=[],
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                payload={},
+            )
+
+        with (
+            patch("synch.tasks.sync_patients", side_effect=create_patient),
+            patch("synch.tasks.sync_facilities", side_effect=create_facility),
+            patch("synch.tasks.sync_prescriptions", side_effect=create_prescription),
+            patch("synch.tasks.sync_appointment_dates_to_turn"),
+            patch(
+                "synch.tasks.sync_new_patients_to_turn",
+                side_effect=RuntimeError("boom"),
+            ),
+            self.assertRaisesMessage(RuntimeError, "boom"),
+        ):
+            sync_all.delay()
+
+        self.assertFalse(Patient.objects.exists())
+        self.assertFalse(Facility.objects.exists())
+        self.assertFalse(Prescription.objects.exists())
 
     def test_sync_all_skips_when_top_level_lock_is_already_held(self):
         Lock.acquire("sync-ccmdd")
@@ -588,6 +640,73 @@ class SyncFacilitiesTaskTests(TestCase):
         self.assertEqual(facility.address_2, "Addo")
         self.assertEqual(facility.payload, {"classification": "Clinic"})
         self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 facilities."])
+
+    def test_sync_facilities_bulk_upserts_existing_and_new_facilities(self):
+        Facility.objects.create(
+            ccmdd_facility_id=110533,
+            name="Old Addo Clinic",
+            latitude="-33.5000",
+            longitude="25.6000",
+            telephone="0000000000",
+            address_1="Old Address",
+            address_2="Old Suburb",
+            payload={"classification": "Old"},
+        )
+        client = Mock()
+        client.iter_facilities.return_value = iter(
+            [
+                {
+                    "id": 110533,
+                    "level_desc_5": "Addo Clinic",
+                    "latitude": "-33.5422",
+                    "longitude": "25.6908",
+                    "telephone": "0421234567",
+                    "address_1": "Main Road",
+                    "address_2": "Addo",
+                    "classification": "Clinic",
+                },
+                {
+                    "id": 220044,
+                    "level_desc_5": "New Town Clinic",
+                    "latitude": "-34.0000",
+                    "longitude": "26.0000",
+                    "telephone": "0410000000",
+                    "address_1": "1 New Street",
+                    "address_2": "New Town",
+                    "classification": "Satellite",
+                    "active": 1,
+                },
+            ]
+        )
+
+        with (
+            patch("synch.tasks.CCMDDAPIClient", return_value=client),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_facilities.delay()
+
+        updated_facility = Facility.objects.get(ccmdd_facility_id=110533)
+        self.assertEqual(updated_facility.name, "Addo Clinic")
+        self.assertEqual(updated_facility.latitude, "-33.5422")
+        self.assertEqual(updated_facility.longitude, "25.6908")
+        self.assertEqual(updated_facility.telephone, "0421234567")
+        self.assertEqual(updated_facility.address_1, "Main Road")
+        self.assertEqual(updated_facility.address_2, "Addo")
+        self.assertEqual(updated_facility.payload, {"classification": "Clinic"})
+
+        created_facility = Facility.objects.get(ccmdd_facility_id=220044)
+        self.assertEqual(created_facility.name, "New Town Clinic")
+        self.assertEqual(created_facility.latitude, "-34.0000")
+        self.assertEqual(created_facility.longitude, "26.0000")
+        self.assertEqual(created_facility.telephone, "0410000000")
+        self.assertEqual(created_facility.address_1, "1 New Street")
+        self.assertEqual(created_facility.address_2, "New Town")
+        self.assertEqual(
+            created_facility.payload,
+            {"classification": "Satellite", "active": 1},
+        )
+        self.assertEqual(Facility.objects.count(), 2)
+        self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 2 facilities."])
 
 
 @override_settings(
