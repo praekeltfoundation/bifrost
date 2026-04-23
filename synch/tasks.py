@@ -183,7 +183,7 @@ def sync_prescriptions(lock: Lock | None = None) -> None:
 def sync_facilities(lock: Lock | None = None) -> None:
     client = _get_client()
 
-    synced = 0
+    facilities: list[Facility] = []
 
     for record in client.iter_facilities():
         facility_id = record.pop("id")
@@ -193,23 +193,38 @@ def sync_facilities(lock: Lock | None = None) -> None:
         telephone = record.pop("telephone", None) or ""
         address_1 = record.pop("address_1", None) or ""
         address_2 = record.pop("address_2", None) or ""
-        Facility.objects.update_or_create(
-            ccmdd_facility_id=facility_id,
-            defaults={
-                "name": name,
-                "latitude": latitude,
-                "longitude": longitude,
-                "telephone": telephone,
-                "address_1": address_1,
-                "address_2": address_2,
-                "payload": record,
-            },
+        facilities.append(
+            Facility(
+                ccmdd_facility_id=facility_id,
+                name=name,
+                latitude=latitude,
+                longitude=longitude,
+                telephone=telephone,
+                address_1=address_1,
+                address_2=address_2,
+                payload=record,
+            )
         )
-        synced += 1
+
+    if facilities:
+        Facility.objects.bulk_create(
+            facilities,
+            update_conflicts=True,
+            unique_fields=["ccmdd_facility_id"],
+            update_fields=[
+                "name",
+                "latitude",
+                "longitude",
+                "telephone",
+                "address_1",
+                "address_2",
+                "payload",
+            ],
+        )
         if lock is not None:
             lock.refresh()
 
-    logger.info("Synced %s facilities.", synced)
+    logger.info("Synced %s facilities.", len(facilities))
 
 
 @shared_task

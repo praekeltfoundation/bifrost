@@ -53,7 +53,8 @@ into the local database.
 - For each returned facility, it stores `id`, `level_desc_5`, `latitude`,
   `longitude`, `telephone`, `address_1`, and `address_2` in explicit model fields.
 - It stores every remaining CCMDD facility field in the `Facility.payload` JSON column.
-- If a facility already exists, it is updated instead of a new one being created.
+- It bulk upserts the full facility list so existing facilities are updated and new
+  facilities are created in one database write.
 
 ## `sync_new_patients_to_turn`
 

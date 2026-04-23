@@ -589,6 +589,73 @@ class SyncFacilitiesTaskTests(TestCase):
         self.assertEqual(facility.payload, {"classification": "Clinic"})
         self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 facilities."])
 
+    def test_sync_facilities_bulk_upserts_existing_and_new_facilities(self):
+        Facility.objects.create(
+            ccmdd_facility_id=110533,
+            name="Old Addo Clinic",
+            latitude="-33.5000",
+            longitude="25.6000",
+            telephone="0000000000",
+            address_1="Old Address",
+            address_2="Old Suburb",
+            payload={"classification": "Old"},
+        )
+        client = Mock()
+        client.iter_facilities.return_value = iter(
+            [
+                {
+                    "id": 110533,
+                    "level_desc_5": "Addo Clinic",
+                    "latitude": "-33.5422",
+                    "longitude": "25.6908",
+                    "telephone": "0421234567",
+                    "address_1": "Main Road",
+                    "address_2": "Addo",
+                    "classification": "Clinic",
+                },
+                {
+                    "id": 220044,
+                    "level_desc_5": "New Town Clinic",
+                    "latitude": "-34.0000",
+                    "longitude": "26.0000",
+                    "telephone": "0410000000",
+                    "address_1": "1 New Street",
+                    "address_2": "New Town",
+                    "classification": "Satellite",
+                    "active": 1,
+                },
+            ]
+        )
+
+        with (
+            patch("synch.tasks.CCMDDAPIClient", return_value=client),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_facilities.delay()
+
+        updated_facility = Facility.objects.get(ccmdd_facility_id=110533)
+        self.assertEqual(updated_facility.name, "Addo Clinic")
+        self.assertEqual(updated_facility.latitude, "-33.5422")
+        self.assertEqual(updated_facility.longitude, "25.6908")
+        self.assertEqual(updated_facility.telephone, "0421234567")
+        self.assertEqual(updated_facility.address_1, "Main Road")
+        self.assertEqual(updated_facility.address_2, "Addo")
+        self.assertEqual(updated_facility.payload, {"classification": "Clinic"})
+
+        created_facility = Facility.objects.get(ccmdd_facility_id=220044)
+        self.assertEqual(created_facility.name, "New Town Clinic")
+        self.assertEqual(created_facility.latitude, "-34.0000")
+        self.assertEqual(created_facility.longitude, "26.0000")
+        self.assertEqual(created_facility.telephone, "0410000000")
+        self.assertEqual(created_facility.address_1, "1 New Street")
+        self.assertEqual(created_facility.address_2, "New Town")
+        self.assertEqual(
+            created_facility.payload,
+            {"classification": "Satellite", "active": 1},
+        )
+        self.assertEqual(Facility.objects.count(), 2)
+        self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 2 facilities."])
+
 
 @override_settings(
     CELERY_TASK_ALWAYS_EAGER=True,
