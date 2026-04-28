@@ -234,12 +234,12 @@ def sync_new_patients_to_turn(
     patient_sync_watermark: datetime,
     lock: Lock | None = None,
 ) -> None:
-    new_patients = Patient.objects.filter(date_created__gt=patient_sync_watermark).only(
-        "ccmdd_patient_id"
-    )
+    new_patients = Patient.objects.filter(invite_sent=False)
 
     timestamp = django_timezone.now().isoformat()
     rows: list[dict[str, object]] = []
+    updated_patient_ids: list[str] = []
+    patient_urn_id_mapping: dict[str, str] = {}
 
     for patient in new_patients:
         try:
@@ -276,6 +276,8 @@ def sync_new_patients_to_turn(
                 "synch_new_user": timestamp,
             }
         )
+        patient_urn_id_mapping[normalized_phone_number] = patient.ccmdd_patient_id
+        updated_patient_ids.append(patient.ccmdd_patient_id)
         if lock is not None:
             lock.refresh()
 
@@ -285,9 +287,20 @@ def sync_new_patients_to_turn(
 
     errors = _get_turn_client().import_contacts(rows)
     if errors:
-        raise TurnAPIError(
-            f"Turn returned import errors for {len(errors)} contact row(s): {errors!r}"
+        for error in errors:
+            urn = error.get("urn") or ""
+            patient_id = patient_urn_id_mapping.get(urn)
+            if patient_id:
+                updated_patient_ids.remove(patient_id)
+        logger.error(
+            "Turn returned import errors for %d contact row(s): %s",
+            len(errors),
+            repr(errors),
         )
+
+    Patient.objects.filter(ccmdd_patient_id__in=updated_patient_ids).update(
+        invite_sent=True
+    )
 
     logger.info("Imported %s new patients to Turn.", len(rows))
 

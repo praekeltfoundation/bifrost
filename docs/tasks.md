@@ -60,15 +60,16 @@ into the local database.
 
 ## `sync_new_patients_to_turn`
 
-`synch.tasks.sync_new_patients_to_turn` imports the `synch_new_user` contact field into Turn for patients created during the current sync run.
+`synch.tasks.sync_new_patients_to_turn` imports the `synch_new_user` contact field into Turn for patients who haven't yet been sent the invite.
 
-- It filters `Patient` records to only those with `date_created` later than last sync date.
+- It filters `Patient` records to only those with `invite_sent` as `False`.
 - For each qualifying patient, it finds the most recent `Prescription` by `date_created` for the matching `patient_id`.
 - It normalizes that prescription's `patient_phone` to E.164 with `phonenumbers` before using it as the Turn `urn`, assuming South Africa (`ZA`) when no country code is provided.
 - It skips patients that have no prescriptions, whose latest prescription has a blank `patient_phone`, or whose phone number cannot be parsed well enough to format.
 - It sets `synch_new_user` to a single `timezone.now().isoformat()` value generated once for the batch.
 - It sends the rows through the Turn CSV contacts import API.
 - It raises an error if Turn reports row-level import errors in the API response.
+- It updates `invite_sent` to `True` for all successfully imported patients.
 
 ## `sync_appointment_dates_to_turn`
 
