@@ -36,9 +36,9 @@ class Lock(models.Model):
     @classmethod
     def acquire(cls, key: str, owner: str | None = None, ttl: timedelta | None = None):
         owner = owner or uuid4().hex
-        now = timezone.now()
 
-        with transaction.atomic():
+        while True:
+            now = timezone.now()
             try:
                 ttl_to_use = ttl or cls.DEFAULT_TTL
                 with transaction.atomic():
@@ -49,18 +49,24 @@ class Lock(models.Model):
                         ttl=ttl_to_use,
                     )
             except IntegrityError:
-                lock = cls.objects.select_for_update().get(key=key)
-                if lock.expires_at > now and lock.owner != owner:
-                    raise LockAcquisitionError(
-                        f"Lock '{key}' is already held by '{lock.owner}'."
-                    ) from None
+                try:
+                    with transaction.atomic():
+                        lock = cls.objects.select_for_update().get(key=key)
+                        if lock.expires_at > now and lock.owner != owner:
+                            raise LockAcquisitionError(
+                                f"Lock '{key}' is already held by '{lock.owner}'."
+                            ) from None
 
-                ttl_to_use = ttl or lock.ttl
-                lock.owner = owner
-                lock.expires_at = now + ttl_to_use
-                lock.ttl = ttl_to_use
-                lock.save(update_fields=["owner", "expires_at", "updated_at", "ttl"])
-                return lock
+                        ttl_to_use = ttl or lock.ttl
+                        lock.owner = owner
+                        lock.expires_at = now + ttl_to_use
+                        lock.ttl = ttl_to_use
+                        lock.save(
+                            update_fields=["owner", "expires_at", "updated_at", "ttl"]
+                        )
+                        return lock
+                except cls.DoesNotExist:
+                    continue
 
     def refresh(self):
         now = timezone.now()

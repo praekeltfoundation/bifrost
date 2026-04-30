@@ -26,6 +26,8 @@ The lock is optimistic at the API level and enforced in the database:
    fails.
 5. If the existing lock has expired, or it is already owned by the same owner,
    the row is updated in place and the caller becomes the current owner.
+6. If the row disappears between the failed insert and the fallback read,
+   acquisition retries because another process may have released it.
 
 This means lock ownership is coordinated through the database transaction rather than in-memory state, so it works across multiple Django processes.
 
@@ -124,4 +126,5 @@ finally:
 ## Notes And Limitations
 
 - Lock cleanup is lazy. Expired rows remain in the table until the next acquisition for the same `key`, at which point the row is reused.
+- Acquisition is resilient to a row disappearing mid-race: if the fallback read cannot find the row, `Lock.acquire()` retries rather than raising `DoesNotExist`.
 - There is no context-manager helper yet; callers must handle `release()` themselves.
