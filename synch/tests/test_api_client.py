@@ -10,8 +10,10 @@ from synch.ccmdd import (
     LONG_RUNNING_POLL_INTERVAL_SECONDS,
     LONG_RUNNING_STATUS_POLL_LIMIT,
     REQUEST_TIMEOUT_SECONDS,
+    RETRY_LIMIT,
     CCMDDAPIClient,
     CCMDDLongRunningOperationTimeout,
+    CCMDDRetryExhausted,
 )
 
 TEST_PASSWORD = "test-password"  # noqa: S105
@@ -41,12 +43,16 @@ class CCMDDAPIClientTests(SimpleTestCase):
         self,
         status_code: int = 200,
         payload: dict | None = None,
+        text: str = "",
+        json_side_effect: Exception | None = None,
     ) -> Mock:
         response = Mock()
         response.status_code = status_code
         response.json.return_value = payload if payload is not None else {}
+        if json_side_effect is not None:
+            response.json.side_effect = json_side_effect
         response.headers = {}
-        response.text = ""
+        response.text = text
         response.raise_for_status.side_effect = None
         if status_code >= 400:
             response.raise_for_status.side_effect = requests.HTTPError(
@@ -125,6 +131,63 @@ class CCMDDAPIClientTests(SimpleTestCase):
             json=None,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
+
+    def test_iter_limited_prescriptions_retries_when_json_response_is_invalid(self):
+        session = Mock()
+        sleep = Mock()
+        random_uniform = Mock(return_value=0.0)
+        session.request.side_effect = [
+            self.make_response(
+                text="<html>not json</html>",
+                json_side_effect=ValueError(
+                    "Expecting value: line 1 column 1 (char 0)"
+                ),
+            ),
+            self.make_response(
+                payload={
+                    "result": 1,
+                    "data": [{"id": "rx-1"}],
+                },
+            ),
+        ]
+        client = self.make_client(
+            session=session,
+            sleep=sleep,
+            random_uniform=random_uniform,
+        )
+
+        items = list(client.iter_limited_prescriptions())
+
+        self.assertEqual(items, [{"id": "rx-1"}])
+        random_uniform.assert_called_once_with(0, 1)
+        sleep.assert_called_once_with(0.0)
+        self.assertEqual(session.request.call_count, 2)
+
+    def test_json_retry_exhaustion_raises_exception(self):
+        session = Mock()
+        sleep = Mock()
+        random_uniform = Mock(return_value=0.0)
+        session.request.side_effect = [
+            self.make_response(
+                text="<html>not json</html>",
+                json_side_effect=ValueError(
+                    "Expecting value: line 1 column 1 (char 0)"
+                ),
+            )
+            for _ in range(RETRY_LIMIT + 1)
+        ]
+        client = self.make_client(
+            session=session,
+            sleep=sleep,
+            random_uniform=random_uniform,
+        )
+
+        with self.assertRaises(CCMDDRetryExhausted) as context:
+            list(client.iter_limited_prescriptions())
+
+        self.assertIn("<html>not json</html>", str(context.exception))
+        self.assertEqual(sleep.call_count, RETRY_LIMIT)
+        self.assertEqual(session.request.call_count, RETRY_LIMIT + 1)
 
     def test_iter_limited_prescriptions_waits_for_single_long_running_operation(self):
         session = Mock()

@@ -74,24 +74,23 @@ class CCMDDAPIClient:
         )
 
     def iter_facilities(self) -> Iterator[dict[str, Any]]:
-        response = self._request(
+        payload = self._request(
             method="GET",
             url=urljoin(self.base_url, "/wapi/facility"),
             json=None,
         )
-        yield from response.json()["data"]
+        yield from payload["data"]
 
     def _iter_limited_records(
         self,
         endpoint_path: str,
         filters: dict,
     ) -> Iterator[dict[str, Any]]:
-        response = self._request(
+        payload = self._request(
             method="POST",
             url=urljoin(self.base_url, endpoint_path),
             json=filters,
         )
-        payload = response.json()
 
         if payload["result"] == CCMDDOperationResult.IMMEDIATE:
             yield from payload["data"]
@@ -105,19 +104,17 @@ class CCMDDAPIClient:
         operations = self._extract_operations(payload)
         for operation in operations:
             self._wait_for_operation(operation["status_location"])
-            resource_response = self._request(
+            resource_payload = self._request(
                 method="GET",
                 url=operation["resource_location"],
                 json=None,
             )
-            payload = resource_response.json()
-            yield from payload["data"]
+            yield from resource_payload["data"]
 
     def _wait_for_operation(self, status_url: str) -> None:
         for _ in range(LONG_RUNNING_STATUS_POLL_LIMIT):
             self.sleep(LONG_RUNNING_POLL_INTERVAL_SECONDS)
-            response = self._request(method="GET", url=status_url, json=None)
-            payload = response.json()
+            payload = self._request(method="GET", url=status_url, json=None)
             if payload["data"]["status"] == "succeeded":
                 return
         raise CCMDDLongRunningOperationTimeout(
@@ -129,7 +126,7 @@ class CCMDDAPIClient:
         method: str,
         url: str,
         json: dict[str, Any] | None,
-    ):
+    ) -> dict[str, Any]:
         retry_attempt = 0
         while True:
             try:
@@ -166,7 +163,19 @@ class CCMDDAPIClient:
                     f"{response.status_code} for {method} {url}",
                 ) from exc
 
-            return response
+            # Keep the raw body in scope so Sentry can capture it if JSON parsing fails.
+            response_body = response.text
+            try:
+                return response.json()
+            except ValueError as exc:
+                if retry_attempt >= RETRY_LIMIT:
+                    raise CCMDDRetryExhausted(
+                        "Temporary CCMDD response "
+                        f"body was not valid JSON for {method} {url}: {response_body}",
+                    ) from exc
+                self._sleep_before_retry(retry_attempt)
+                retry_attempt += 1
+                continue
 
     def _sleep_before_retry(self, retry_attempt: int) -> None:
         max_delay_seconds = float(2**retry_attempt)
