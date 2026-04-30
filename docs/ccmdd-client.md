@@ -69,6 +69,7 @@ The client handles the CCMDD long-running operation flow automatically.
 
 The client retries temporary failures up to 5 times with random exponential backoff.
 
+- Each HTTP request uses a 60 second timeout before it is retried or fails.
 - Retryable `4xx` statuses: `408`, `409`, `425`, `429`
 - Retryable `5xx` statuses: all `500`, `502`, `503`, `504`
 - Retryable transport failures: `requests` exceptions such as timeouts and connection errors
