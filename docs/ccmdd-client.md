@@ -72,6 +72,8 @@ The client retries temporary failures up to 5 times with random exponential back
 - Retryable `4xx` statuses: `408`, `409`, `425`, `429`
 - Retryable `5xx` statuses: all `500`, `502`, `503`, `504`
 - Retryable transport failures: `requests` exceptions such as timeouts and connection errors
+- Responses that return `200` but cannot be decoded as JSON are retried as temporary failures
+- If JSON retries are exhausted, the raw response body is included in the failure message and remains available in the failure context for Sentry
 
 Non-temporary failures raise an exception immediately.
 
