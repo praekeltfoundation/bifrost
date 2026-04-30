@@ -1,6 +1,7 @@
 from datetime import timedelta
 from unittest.mock import patch
 
+from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -45,6 +46,29 @@ class LockAcquireTests(TestCase):
         self.assertEqual(Lock.objects.count(), 1)
         self.assertEqual(reacquired_lock.pk, original_lock.pk)
         self.assertEqual(reacquired_lock.owner, "worker-2")
+
+    def test_acquire_retries_if_row_disappears_before_reload(self):
+        real_create = Lock.objects.create
+        create_attempts = 0
+
+        def create_side_effect(*args, **kwargs):
+            nonlocal create_attempts
+            create_attempts += 1
+            if create_attempts == 1:
+                raise IntegrityError
+            return real_create(*args, **kwargs)
+
+        with (
+            patch.object(Lock.objects, "create", side_effect=create_side_effect),
+            patch.object(Lock.objects, "select_for_update") as select_for_update_mock,
+        ):
+            select_for_update_mock.return_value.get.side_effect = Lock.DoesNotExist
+            lock = Lock.acquire(key="daily-sync", owner="worker-1")
+
+        self.assertEqual(lock.owner, "worker-1")
+        self.assertEqual(Lock.objects.count(), 1)
+        self.assertEqual(create_attempts, 2)
+        self.assertEqual(select_for_update_mock.return_value.get.call_count, 1)
 
 
 class LockReleaseTests(TestCase):
