@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from django.test import TestCase
 
@@ -17,6 +17,110 @@ class PatientModelTests(TestCase):
         )
 
         self.assertEqual(str(patient), patient.ccmdd_patient_id)
+
+    def test_messaging_phone_number_uses_most_recent_valid_phone(self):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-old-valid",
+            date_created=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-new-invalid",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="not-a-phone-number",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+
+        self.assertEqual(patient.messaging_phone_number, "+27820000001")
+
+    def test_upcoming_appointment_skips_unusable_facilities_and_breaks_ties_by_recency(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=2,
+            name="",
+            latitude="1",
+            longitude="2",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        preferred_facility = Facility.objects.create(
+            ccmdd_facility_id=3,
+            name="Clinic B",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-unusable-facility",
+            date_created=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=2,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-21"}],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-same-day-older",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=999,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-22"}],
+            payload={},
+        )
+        chosen_prescription = Prescription.objects.create(
+            ccmdd_prescription_id="rx-same-day-newer",
+            date_created=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=3,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000003",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-22"}],
+            payload={},
+        )
+
+        appointment = patient.get_upcoming_appointment(today=date(2026, 4, 21))
+
+        self.assertIsNotNone(appointment)
+        if appointment is None:
+            self.fail("Expected an upcoming appointment")
+        self.assertEqual(appointment.date, date(2026, 4, 22))
+        self.assertEqual(appointment.prescription, chosen_prescription)
+        self.assertEqual(appointment.facility, preferred_facility)
 
 
 class PrescriptionModelTests(TestCase):
@@ -57,3 +161,17 @@ class FacilityModelTests(TestCase):
         )
 
         self.assertEqual(str(facility), facility.name)
+
+    def test_is_usable_for_messaging_requires_non_blank_name(self):
+        blank_name_facility = Facility.objects.create(
+            ccmdd_facility_id=110534,
+            name="",
+            latitude="-33.5422",
+            longitude="25.6908",
+            telephone="0123456789",
+            address_1="Main Road",
+            address_2="Addo",
+            payload={"classification": "Clinic"},
+        )
+
+        self.assertFalse(blank_name_facility.is_usable_for_messaging)

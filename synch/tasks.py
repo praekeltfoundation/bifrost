@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
-import phonenumbers
 from celery import shared_task
 from django.conf import settings
 from django.db import transaction
@@ -40,49 +39,6 @@ def _get_turn_client() -> TurnAPIClient:
     )
 
 
-def _normalize_phone_number(value: str) -> str | None:
-    try:
-        phone_number = phonenumbers.parse(value, "ZA")
-    except phonenumbers.NumberParseException:
-        return None
-
-    return phonenumbers.format_number(
-        phone_number,
-        phonenumbers.PhoneNumberFormat.E164,
-    )
-
-
-def _parse_return_date(value: object) -> date | None:
-    if not isinstance(value, str):
-        return None
-
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        return None
-
-
-def _get_next_appointment(
-    prescriptions: list[Prescription],
-    today: date,
-) -> tuple[date, Prescription] | None:
-    candidates: list[tuple[date, Prescription]] = []
-
-    for prescription in prescriptions:
-        for return_date in prescription.return_dates:
-            if not isinstance(return_date, dict):
-                continue
-            appointment_date = _parse_return_date(return_date.get("return_date"))
-            if appointment_date is None or appointment_date < today:
-                continue
-            candidates.append((appointment_date, prescription))
-
-    if not candidates:
-        return None
-
-    return min(candidates, key=lambda candidate: candidate[0])
-
-
 @shared_task
 def healthcheck():
     return "OK"
@@ -101,17 +57,17 @@ def sync_all() -> None:
 
     try:
         with transaction.atomic():
-            patient_sync_watermark = sync_patients(lock)
+            sync_patients(lock)
             sync_facilities(lock)
             sync_prescriptions(lock)
             sync_appointment_dates_to_turn(lock)
-            sync_new_patients_to_turn(patient_sync_watermark, lock)
+            sync_new_patients_to_turn(lock)
     finally:
         lock.release()
 
 
 @shared_task
-def sync_patients(lock: Lock | None = None) -> datetime:
+def sync_patients(lock: Lock | None = None) -> None:
     latest_date_updated = Patient.objects.aggregate(
         latest_date_updated=Max("date_updated")
     )["latest_date_updated"]
@@ -138,7 +94,6 @@ def sync_patients(lock: Lock | None = None) -> datetime:
             lock.refresh()
 
     logger.info("Synced %s patients.", synced)
-    return latest_date_updated
 
 
 @shared_task
@@ -230,53 +185,48 @@ def sync_facilities(lock: Lock | None = None) -> None:
 
 
 @shared_task
-def sync_new_patients_to_turn(
-    patient_sync_watermark: datetime,
-    lock: Lock | None = None,
-) -> None:
+def sync_new_patients_to_turn(lock: Lock | None = None) -> None:
     new_patients = Patient.objects.filter(invite_sent=False)
 
     timestamp = django_timezone.now().isoformat()
     rows: list[dict[str, object]] = []
     updated_patient_ids: list[str] = []
     patient_urn_id_mapping: dict[str, str] = {}
+    today = django_timezone.localdate()
 
     for patient in new_patients:
-        try:
-            latest_prescription = Prescription.objects.filter(
-                patient_id=patient.ccmdd_patient_id
-            ).latest("date_created")
-        except Prescription.DoesNotExist:
+        sync_details = patient.get_turn_sync_details(today)
+        if not patient.prescriptions.exists():
             logger.info(
                 "No prescriptions found for patient %s, skipping Turn sync.",
                 patient.ccmdd_patient_id,
             )
             continue
 
-        if not latest_prescription.patient_phone:
+        if sync_details.messaging_phone_number is None:
             logger.info(
-                "Patient %s does not have a phone number, skipping Turn sync",
+                "Patient %s does not have a messaging phone number, "
+                "skipping Turn sync.",
                 patient.ccmdd_patient_id,
             )
             continue
 
-        normalized_phone_number = _normalize_phone_number(
-            latest_prescription.patient_phone
-        )
-        if normalized_phone_number is None:
+        if sync_details.upcoming_appointment is None:
             logger.info(
-                "Patient %s has an unparseable phone number, skipping Turn sync.",
+                "Patient %s does not have an upcoming appointment, skipping Turn sync.",
                 patient.ccmdd_patient_id,
             )
             continue
 
         rows.append(
             {
-                "urn": normalized_phone_number,
+                "urn": sync_details.messaging_phone_number,
                 "synch_new_user": timestamp,
             }
         )
-        patient_urn_id_mapping[normalized_phone_number] = patient.ccmdd_patient_id
+        patient_urn_id_mapping[sync_details.messaging_phone_number] = (
+            patient.ccmdd_patient_id
+        )
         updated_patient_ids.append(patient.ccmdd_patient_id)
         if lock is not None:
             lock.refresh()
@@ -311,12 +261,8 @@ def sync_appointment_dates_to_turn(lock: Lock | None = None) -> None:
     rows: list[dict[str, object]] = []
 
     for patient in Patient.objects.only("ccmdd_patient_id").iterator():
-        prescriptions = list(
-            Prescription.objects.filter(patient_id=patient.ccmdd_patient_id).order_by(
-                "date_created"
-            )
-        )
-        if not prescriptions:
+        sync_details = patient.get_turn_sync_details(today)
+        if not patient.prescriptions.exists():
             logger.info(
                 "No prescriptions found for patient %s, "
                 "skipping Turn appointment sync.",
@@ -324,48 +270,28 @@ def sync_appointment_dates_to_turn(lock: Lock | None = None) -> None:
             )
             continue
 
-        latest_prescription = prescriptions[-1]
-        if not latest_prescription.patient_phone:
+        if sync_details.messaging_phone_number is None:
             logger.info(
-                "Patient %s does not have a phone number, "
+                "Patient %s does not have a messaging phone number, "
                 "skipping Turn appointment sync.",
                 patient.ccmdd_patient_id,
             )
             continue
 
-        normalized_phone_number = _normalize_phone_number(
-            latest_prescription.patient_phone
-        )
-        if normalized_phone_number is None:
-            logger.info(
-                "Patient %s has an unparseable phone number, "
-                "skipping Turn appointment sync.",
-                patient.ccmdd_patient_id,
-            )
-            continue
-
-        next_appointment = _get_next_appointment(prescriptions, today)
         row: dict[str, object] = {
-            "urn": normalized_phone_number,
+            "urn": sync_details.messaging_phone_number,
             "synch_next_appointment_date": "",
             "synch_appointment_facility_name": "",
             "synch_appointment_facility_latitude": "",
             "synch_appointment_facility_longitude": "",
         }
 
-        if next_appointment is not None:
-            appointment_date, prescription = next_appointment
-            facility = None
-            if prescription.facility_id is not None:
-                facility = Facility.objects.filter(
-                    ccmdd_facility_id=prescription.facility_id
-                ).first()
-
-            row["synch_next_appointment_date"] = appointment_date.isoformat()
-            if facility is not None:
-                row["synch_appointment_facility_name"] = facility.name or ""
-                row["synch_appointment_facility_latitude"] = facility.latitude or ""
-                row["synch_appointment_facility_longitude"] = facility.longitude or ""
+        if sync_details.upcoming_appointment is not None:
+            appointment = sync_details.upcoming_appointment
+            row["synch_next_appointment_date"] = appointment.date.isoformat()
+            row["synch_appointment_facility_name"] = appointment.facility.name
+            row["synch_appointment_facility_latitude"] = appointment.facility.latitude
+            row["synch_appointment_facility_longitude"] = appointment.facility.longitude
 
         rows.append(row)
         if lock is not None:
