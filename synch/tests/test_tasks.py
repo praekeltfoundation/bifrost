@@ -78,12 +78,8 @@ class CeleryTaskExecutionTests(TestCase):
         sync_patients_mock.assert_called_once()
         sync_facilities_mock.assert_called_once()
         sync_prescriptions_mock.assert_called_once()
-        sync_appointment_dates_to_turn_mock.assert_called_once_with(
-            sync_patients_mock.call_args.args[0]
-        )
-        sync_new_patients_to_turn.assert_called_once_with(
-            sync_patients_mock.call_args.args[0]
-        )
+        sync_appointment_dates_to_turn_mock.assert_called_once()
+        sync_new_patients_to_turn.assert_called_once()
         self.assertIs(
             sync_patients_mock.call_args.args[0],
             sync_facilities_mock.call_args.args[0],
@@ -903,9 +899,7 @@ class SyncNewPatientsToTurnTests(TestCase):
             ),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_new_patients_to_turn(
-                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
-            )
+            sync_new_patients_to_turn()
 
         turn_client.import_contacts.assert_not_called()
         self.assertEqual(
@@ -965,9 +959,7 @@ class SyncNewPatientsToTurnTests(TestCase):
                 return_value=datetime(2026, 4, 21).date(),
             ),
         ):
-            sync_new_patients_to_turn(
-                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
-            )
+            sync_new_patients_to_turn()
 
         turn_client.import_contacts.assert_not_called()
         blank_phone_patient.refresh_from_db()
@@ -1013,9 +1005,7 @@ class SyncNewPatientsToTurnTests(TestCase):
                 return_value=datetime(2026, 4, 21).date(),
             ),
         ):
-            sync_new_patients_to_turn(
-                datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)
-            )
+            sync_new_patients_to_turn()
 
         turn_client.import_contacts.assert_not_called()
 

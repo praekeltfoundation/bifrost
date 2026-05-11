@@ -79,10 +79,10 @@ into the local database.
 - It iterates all `Patient` records in the local database.
 - For each patient, it resolves the same shared patient messaging state used by `sync_new_patients_to_turn`.
 - It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
-- It skips patients that have no prescriptions or no usable messaging phone number.
+- It skips patients that have no usable messaging phone number.
 - It flattens `return_dates` across all of the patient's prescriptions, keeps only appointment dates on or after `django.utils.timezone.localdate()`, discards appointments whose facility is missing or unnamed, and selects the earliest remaining appointment.
 - If multiple usable appointments share the same earliest date, it selects the appointment from the most recently created prescription.
 - It sends `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` from the selected appointment's facility.
-- It clears `synch_next_appointment_date`, `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` with empty strings when a patient has no usable appointment on or after today.
+- It clears `synch_next_appointment_date`, `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` with empty strings when a reachable patient has no usable appointment on or after today.
 - It sends the rows through the Turn CSV contacts import API.
 - It raises an error if Turn reports row-level import errors in the API response.

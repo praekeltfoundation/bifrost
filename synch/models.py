@@ -78,9 +78,21 @@ class Patient(models.Model):
 
     def get_upcoming_appointment(self, today: date) -> UpcomingAppointment | None:
         candidates: list[UpcomingAppointment] = []
+        prescriptions = list(self.prescriptions)
+        facility_ids = {
+            prescription.facility_id
+            for prescription in prescriptions
+            if prescription.facility_id is not None
+        }
+        facilities_by_id = {
+            facility.ccmdd_facility_id: facility
+            for facility in Facility.objects.filter(ccmdd_facility_id__in=facility_ids)
+        }
 
-        for prescription in self.prescriptions:
-            facility = prescription.get_messaging_facility()
+        for prescription in prescriptions:
+            facility = prescription.get_messaging_facility(
+                facilities_by_id=facilities_by_id
+            )
             if facility is None:
                 continue
 
@@ -161,11 +173,20 @@ class Prescription(models.Model):
 
         return appointment_dates
 
-    def get_messaging_facility(self) -> Facility | None:
+    def get_messaging_facility(
+        self,
+        *,
+        facilities_by_id: dict[int, Facility] | None = None,
+    ) -> Facility | None:
         if self.facility_id is None:
             return None
 
-        facility = Facility.objects.filter(ccmdd_facility_id=self.facility_id).first()
+        if facilities_by_id is None:
+            facility = Facility.objects.filter(
+                ccmdd_facility_id=self.facility_id
+            ).first()
+        else:
+            facility = facilities_by_id.get(self.facility_id)
         if facility is None or not facility.is_usable_for_messaging:
             return None
 

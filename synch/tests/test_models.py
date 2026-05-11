@@ -122,6 +122,51 @@ class PatientModelTests(TestCase):
         self.assertEqual(appointment.prescription, chosen_prescription)
         self.assertEqual(appointment.facility, preferred_facility)
 
+    def test_upcoming_appointment_uses_single_facility_query_for_patient(self):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=1,
+            name="Clinic A",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=2,
+            name="Clinic B",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        for prescription_id, facility_id in (("rx-1", 1), ("rx-2", 2), ("rx-3", 999)):
+            Prescription.objects.create(
+                ccmdd_prescription_id=prescription_id,
+                date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+                facility_id=facility_id,
+                patient_id=patient.ccmdd_patient_id,
+                patient_phone="0820000001",
+                department_id=1,
+                return_dates=[{"return_date": "2026-04-22"}],
+                payload={},
+            )
+
+        with self.assertNumQueries(2):
+            appointment = patient.get_upcoming_appointment(today=date(2026, 4, 21))
+
+        self.assertIsNotNone(appointment)
+
 
 class PrescriptionModelTests(TestCase):
     def test_string_representation_uses_prescription_id(self):

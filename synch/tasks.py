@@ -196,12 +196,6 @@ def sync_new_patients_to_turn(lock: Lock | None = None) -> None:
 
     for patient in new_patients:
         sync_details = patient.get_turn_sync_details(today)
-        if not patient.prescriptions.exists():
-            logger.info(
-                "No prescriptions found for patient %s, skipping Turn sync.",
-                patient.ccmdd_patient_id,
-            )
-            continue
 
         if sync_details.messaging_phone_number is None:
             logger.info(
@@ -262,14 +256,6 @@ def sync_appointment_dates_to_turn(lock: Lock | None = None) -> None:
 
     for patient in Patient.objects.only("ccmdd_patient_id").iterator():
         sync_details = patient.get_turn_sync_details(today)
-        if not patient.prescriptions.exists():
-            logger.info(
-                "No prescriptions found for patient %s, "
-                "skipping Turn appointment sync.",
-                patient.ccmdd_patient_id,
-            )
-            continue
-
         if sync_details.messaging_phone_number is None:
             logger.info(
                 "Patient %s does not have a messaging phone number, "
