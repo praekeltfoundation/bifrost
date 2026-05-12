@@ -63,9 +63,10 @@ into the local database.
 `synch.tasks.sync_new_patients_to_turn` imports the `synch_new_user` contact field into Turn for patients who haven't yet been sent the invite.
 
 - It filters `Patient` records to only those with `invite_sent` as `False`.
-- For each qualifying patient, it finds the most recent `Prescription` by `date_created` for the matching `patient_id`.
-- It normalizes that prescription's `patient_phone` to E.164 with `phonenumbers` before using it as the Turn `urn`, assuming South Africa (`ZA`) when no country code is provided.
-- It skips patients that have no prescriptions, whose latest prescription has a blank `patient_phone`, or whose phone number cannot be parsed well enough to format.
+- For each qualifying patient, it resolves a shared patient messaging state from all matching prescriptions.
+- It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
+- It only imports patients that have both a usable messaging phone number and an upcoming appointment on or after `django.utils.timezone.localdate()`.
+- It only treats an appointment as usable when the appointment's prescription resolves to a `Facility` with a non-blank name.
 - It sets `synch_new_user` to a single `timezone.now().isoformat()` value generated once for the batch.
 - It sends the rows through the Turn CSV contacts import API.
 - It raises an error if Turn reports row-level import errors in the API response.
@@ -76,11 +77,12 @@ into the local database.
 `synch.tasks.sync_appointment_dates_to_turn` refreshes next-appointment contact fields in Turn for every locally synced patient.
 
 - It iterates all `Patient` records in the local database.
-- For each patient, it fetches all matching `Prescription` records and uses the latest prescription by `date_created` to source the Turn `urn` from `patient_phone`.
-- It normalizes that phone number to E.164 with `phonenumbers`, assuming South Africa (`ZA`) when no country code is provided.
-- It skips patients that have no prescriptions, whose latest prescription has a blank `patient_phone`, or whose phone number cannot be parsed well enough to format.
-- It flattens `return_dates` across all of the patient's prescriptions, keeps only appointment dates on or after `django.utils.timezone.localdate()`, sorts them, and selects the earliest upcoming appointment.
-- It looks up the `Facility` matching the selected appointment's prescription `facility_id` and sends `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` when available.
-- It clears `synch_next_appointment_date`, `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` with empty strings when a patient has no appointment on or after today.
+- For each patient, it resolves the same shared patient messaging state used by `sync_new_patients_to_turn`.
+- It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
+- It skips patients that have no usable messaging phone number.
+- It flattens `return_dates` across all of the patient's prescriptions, keeps only appointment dates on or after `django.utils.timezone.localdate()`, discards appointments whose facility is missing or unnamed, and selects the earliest remaining appointment.
+- If multiple usable appointments share the same earliest date, it selects the appointment from the most recently created prescription.
+- It sends `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` from the selected appointment's facility.
+- It clears `synch_next_appointment_date`, `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` with empty strings when a reachable patient has no usable appointment on or after today.
 - It sends the rows through the Turn CSV contacts import API.
 - It raises an error if Turn reports row-level import errors in the API response.
