@@ -1,0 +1,23 @@
+{
+  "app": {
+    "type": "lua",
+    "name": "synch_delivery_failures",
+    "title": "SynCH delivery failures",
+    "version": "0.1.0",
+    "description": "Suppress SynCH reminders for contacts with permanent WhatsApp delivery failures.",
+    "dependencies": [],
+    "functions": []
+  },
+  "contact_fields": [
+    {
+      "name": "synch_delivery_failure_message_id",
+      "type": "STRING",
+      "display": "synch_delivery_failure_message_id",
+      "private": true
+    }
+  ],
+  "media_assets": [],
+  "journeys": [],
+  "templates": [],
+  "flows": []
+}

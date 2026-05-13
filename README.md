@@ -42,6 +42,20 @@ The post-sync Turn import uses these settings:
 - `TURN_BASE_URL`
 - `TURN_TOKEN`
 
+This repo also contains standalone Turn.io Lua apps under `turn_apps/`. They are separate deployables from Django with their own tests and packaging.
+
+Current Turn app:
+
+- `turn_apps/synch_delivery_failures`: suppresses SynCH reminders after permanent WhatsApp delivery failures (`131026`, `131050`) and records the first failure in `synch_delivery_failure_message_id`
+
+Run Turn app commands from the app directory:
+
+```bash
+cd turn_apps/synch_delivery_failures
+make test
+make build
+```
+
 Sentry is optional. Bifrost only initializes Sentry when `SENTRY_DSN` is set. You can further configure it with `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_SEND_DEFAULT_PII`, `SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_PROFILES_SAMPLE_RATE`, and `SENTRY_DEBUG`.
 
 Start a worker:
@@ -121,3 +135,4 @@ uv run ./manage.py test
 - [CCMDD client](docs/ccmdd-client.md)
 - [Turn client](docs/turn-client.md)
 - [Tasks](docs/tasks.md)
+- [SynCH delivery failures Turn app](turn_apps/synch_delivery_failures/README.md)
