@@ -8,7 +8,7 @@ on:
       - "**"
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -53,8 +53,8 @@ jobs:
         working-directory: turn_apps/synch_delivery_failures
         run: make build
 
-      - uses: actions/upload-artifact@v4
-        name: Upload Turn app package
+      - uses: softprops/action-gh-release@v2
+        name: Upload Turn app release asset
+        if: github.ref_type == 'tag'
         with:
-          name: synch_delivery_failures-package
-          path: turn_apps/synch_delivery_failures/*.zip
+          files: turn_apps/synch_delivery_failures/*.zip
