@@ -42,3 +42,19 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  build_synch_delivery_failures:
+    name: Build Turn app package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Turn app package
+        working-directory: turn_apps/synch_delivery_failures
+        run: make build
+
+      - uses: actions/upload-artifact@v4
+        name: Upload Turn app package
+        with:
+          name: synch_delivery_failures-package
+          path: turn_apps/synch_delivery_failures/*.zip
