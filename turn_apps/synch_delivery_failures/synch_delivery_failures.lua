@@ -14,7 +14,7 @@ function App.on_event(app, number, event, data)
         return handler:clear_delivery_error_subscriptions()
     end
 
-    if event == "contact_fields_changed" then
+    if event == "contact_fields_changed" or event == "worker_init" then
         return true
     end
 
