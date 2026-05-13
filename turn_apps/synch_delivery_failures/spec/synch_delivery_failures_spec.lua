@@ -338,4 +338,54 @@ describe("synch_delivery_failures", function()
             assert(result == "# SynCH delivery failures")
         end)
     end)
+
+    describe("core event compatibility", function()
+        it("reapplies subscriptions on upgrade", function()
+            local result = App.on_event(app_config, number, "upgrade", {})
+            local subscriptions = set_delivery_error_subscriptions_spy.calls[1].vals[1]
+
+            assert(result == true)
+            assert(#subscriptions == 2)
+            assert(subscriptions[1] == 131026)
+            assert(subscriptions[2] == 131050)
+        end)
+
+        it("reapplies subscriptions on downgrade", function()
+            local result = App.on_event(app_config, number, "downgrade", {})
+            local subscriptions = set_delivery_error_subscriptions_spy.calls[1].vals[1]
+
+            assert(result == true)
+            assert(#subscriptions == 2)
+            assert(subscriptions[1] == 131026)
+            assert(subscriptions[2] == 131050)
+        end)
+
+        it("accepts contact field change events as a no-op", function()
+            local result = App.on_event(app_config, number, "contact_fields_changed", {})
+
+            assert(result == true)
+            assert(set_delivery_error_subscriptions_spy.call_count == 0)
+        end)
+
+        it("returns a 404 response for unsupported http requests", function()
+            local success, response = App.on_event(app_config, number, "http_request", {
+                method = "GET",
+                path_info = {},
+            })
+
+            assert(success == true)
+            assert(response.status == 404)
+            assert(response.body == "Not found")
+        end)
+
+        it("returns an explicit error for unsupported journey events", function()
+            local signal, payload = App.on_event(app_config, number, "journey_event", {
+                function_name = "unsupported",
+                args = {},
+            })
+
+            assert(signal == "error")
+            assert(payload == "Unsupported journey event")
+        end)
+    end)
 end)

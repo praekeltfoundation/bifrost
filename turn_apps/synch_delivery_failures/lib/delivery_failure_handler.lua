@@ -16,19 +16,13 @@ function DeliveryFailureHandler.new()
     return setmetatable({}, DeliveryFailureHandler)
 end
 
-function DeliveryFailureHandler:install()
+function DeliveryFailureHandler:subscribe_to_delivery_errors()
     return self:_configure_delivery_error_subscriptions(
         self.SUPPORTED_DELIVERY_ERROR_CODES
     )
 end
 
-function DeliveryFailureHandler:config_changed()
-    return self:_configure_delivery_error_subscriptions(
-        self.SUPPORTED_DELIVERY_ERROR_CODES
-    )
-end
-
-function DeliveryFailureHandler:uninstall()
+function DeliveryFailureHandler:clear_delivery_error_subscriptions()
     return self:_configure_delivery_error_subscriptions({})
 end
 
