@@ -1,6 +1,49 @@
+from __future__ import annotations
+
+from datetime import date
+
 from django.contrib import admin
+from django.core.exceptions import ValidationError
 
 from synch.models import Facility, Patient, Prescription
+
+ALLOWED_RETURN_DATE_KEYS = {
+    "return_date",
+    "note",
+    "day_count",
+    "description",
+}
+
+
+def validate_return_dates(return_dates: object) -> list[dict[str, object]]:
+    if not isinstance(return_dates, list):
+        raise ValidationError("Return dates must be a list of objects.")
+
+    for index, item in enumerate(return_dates, start=1):
+        if not isinstance(item, dict):
+            raise ValidationError(f"Return date entry {index} must be an object.")
+
+        unknown_keys = set(item) - ALLOWED_RETURN_DATE_KEYS
+        if unknown_keys:
+            raise ValidationError(
+                f"Return date entry {index} has unknown keys: "
+                f"{', '.join(sorted(unknown_keys))}."
+            )
+
+        return_date = item.get("return_date")
+        if not isinstance(return_date, str):
+            raise ValidationError(
+                f"Return date entry {index} must include a return_date string."
+            )
+
+        try:
+            date.fromisoformat(return_date)
+        except ValueError as error:
+            raise ValidationError(
+                f"Return date entry {index} must use YYYY-MM-DD format."
+            ) from error
+
+    return return_dates
 
 
 @admin.register(Patient)
@@ -19,7 +62,16 @@ class PrescriptionAdmin(admin.ModelAdmin):
         "date_updated",
     )
     search_fields = ("ccmdd_prescription_id", "patient_id")
-    readonly_fields = ("return_dates", "payload")
+    readonly_fields = ("payload",)
+
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        form_class = super().get_form(request, obj, change=change, **kwargs)
+
+        class PrescriptionAdminForm(form_class):
+            def clean_return_dates(self) -> list[dict[str, object]]:
+                return validate_return_dates(self.cleaned_data["return_dates"])
+
+        return PrescriptionAdminForm
 
 
 @admin.register(Facility)
