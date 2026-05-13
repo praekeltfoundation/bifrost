@@ -1,0 +1,18 @@
+# Built packages
+*.zip
+
+# Turn App Push state
+.turn-app.json
+.turn-app-state.json
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+**/.claude/settings.local.json
