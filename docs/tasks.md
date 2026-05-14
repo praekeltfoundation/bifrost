@@ -65,8 +65,9 @@ into the local database.
 - It filters `Patient` records to only those with `invite_sent` as `False`.
 - For each qualifying patient, it resolves a shared patient messaging state from all matching prescriptions.
 - It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
-- It only imports patients that have both a usable messaging phone number and an upcoming appointment on or after `django.utils.timezone.localdate()`.
-- It only treats an appointment as usable when the appointment's prescription resolves to a `Facility` with a non-blank name.
+- It only imports patients that have both a usable messaging phone number and a usable facility.
+- It uses the upcoming appointment's facility when a future appointment on or after `django.utils.timezone.localdate()` resolves to a `Facility` with a non-blank name.
+- If no usable upcoming appointment exists after filtering by date and facility validity, it falls back to the most recently created prescription whose facility resolves to a non-blank name.
 - It sets `synch_new_user` to a single `timezone.now().isoformat()` value generated once for the batch.
 - It sends the rows through the Turn CSV contacts import API.
 - It raises an error if Turn reports row-level import errors in the API response.
@@ -82,7 +83,8 @@ into the local database.
 - It skips patients that have no usable messaging phone number.
 - It flattens `return_dates` across all of the patient's prescriptions, keeps only appointment dates on or after `django.utils.timezone.localdate()`, discards appointments whose facility is missing or unnamed, and selects the earliest remaining appointment.
 - If multiple usable appointments share the same earliest date, it selects the appointment from the most recently created prescription.
-- It sends `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` from the selected appointment's facility.
-- It clears `synch_next_appointment_date`, `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` with empty strings when a reachable patient has no usable appointment on or after today.
+- It sends `synch_next_appointment_date` only when a usable upcoming appointment exists.
+- It sends `synch_appointment_facility_name`, `synch_appointment_facility_latitude`, and `synch_appointment_facility_longitude` from the selected appointment's facility when a usable upcoming appointment exists.
+- If no usable upcoming appointment exists after filtering by date and facility validity, it falls back to the most recently created prescription whose facility resolves to a non-blank name and sends those facility fields while leaving `synch_next_appointment_date` blank.
 - It sends the rows through the Turn CSV contacts import API.
 - It raises an error if Turn reports row-level import errors in the API response.
