@@ -205,9 +205,9 @@ def sync_new_patients_to_turn(lock: Lock | None = None) -> None:
             )
             continue
 
-        if sync_details.upcoming_appointment is None:
+        if sync_details.messaging_facility is None:
             logger.info(
-                "Patient %s does not have an upcoming appointment, skipping Turn sync.",
+                "Patient %s does not have a messaging facility, skipping Turn sync.",
                 patient.ccmdd_patient_id,
             )
             continue
@@ -275,9 +275,11 @@ def sync_appointment_dates_to_turn(lock: Lock | None = None) -> None:
         if sync_details.upcoming_appointment is not None:
             appointment = sync_details.upcoming_appointment
             row["synch_next_appointment_date"] = appointment.date.isoformat()
-            row["synch_appointment_facility_name"] = appointment.facility.name
-            row["synch_appointment_facility_latitude"] = appointment.facility.latitude
-            row["synch_appointment_facility_longitude"] = appointment.facility.longitude
+        if sync_details.messaging_facility is not None:
+            facility = sync_details.messaging_facility
+            row["synch_appointment_facility_name"] = facility.name
+            row["synch_appointment_facility_latitude"] = facility.latitude
+            row["synch_appointment_facility_longitude"] = facility.longitude
 
         rows.append(row)
         if lock is not None:

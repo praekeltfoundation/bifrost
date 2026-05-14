@@ -167,6 +167,112 @@ class PatientModelTests(TestCase):
 
         self.assertIsNotNone(appointment)
 
+    def test_turn_sync_details_fall_back_to_latest_usable_facility(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=1,
+            name="Clinic A",
+            latitude="-26.1",
+            longitude="28.1",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        latest_facility = Facility.objects.create(
+            ccmdd_facility_id=2,
+            name="Clinic B",
+            latitude="-26.2",
+            longitude="28.2",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-old",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-20"}],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-new",
+            date_created=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=2,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+
+        sync_details = patient.get_turn_sync_details(today=date(2026, 4, 21))
+
+        self.assertEqual(sync_details.messaging_phone_number, "+27820000002")
+        self.assertIsNone(sync_details.upcoming_appointment)
+        self.assertEqual(sync_details.messaging_facility, latest_facility)
+
+    def test_turn_sync_details_fall_back_when_future_date_lacks_usable_facility(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        fallback_facility = Facility.objects.create(
+            ccmdd_facility_id=1,
+            name="Clinic A",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-fallback",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-future-missing-facility",
+            date_created=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=999,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-22"}],
+            payload={},
+        )
+
+        sync_details = patient.get_turn_sync_details(today=date(2026, 4, 21))
+
+        self.assertEqual(sync_details.messaging_phone_number, "+27820000002")
+        self.assertIsNone(sync_details.upcoming_appointment)
+        self.assertEqual(sync_details.messaging_facility, fallback_facility)
+
 
 class PrescriptionModelTests(TestCase):
     def test_string_representation_uses_prescription_id(self):

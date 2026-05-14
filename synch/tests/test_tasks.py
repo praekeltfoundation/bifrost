@@ -913,7 +913,7 @@ class SyncNewPatientsToTurnTests(TestCase):
         patient.refresh_from_db()
         self.assertFalse(patient.invite_sent)
 
-    def test_sync_new_patients_to_turn_skips_patients_without_prescriptions_or_usable_appointment(  # noqa: E501
+    def test_sync_new_patients_to_turn_skips_patients_without_prescriptions_or_usable_facility(  # noqa: E501
         self,
     ):
         Patient.objects.create(
@@ -922,18 +922,18 @@ class SyncNewPatientsToTurnTests(TestCase):
             date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
             payload={},
         )
-        blank_phone_patient = Patient.objects.create(
-            ccmdd_patient_id="blank-phone",
+        no_facility_patient = Patient.objects.create(
+            ccmdd_patient_id="no-facility",
             date_created=datetime(2026, 4, 1, 0, 0, 2, tzinfo=timezone.utc),
             date_updated=datetime(2026, 4, 1, 0, 0, 2, tzinfo=timezone.utc),
             payload={},
         )
         Prescription.objects.create(
-            ccmdd_prescription_id="blank-phone-rx",
+            ccmdd_prescription_id="no-facility-rx",
             date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
             date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
-            facility_id=1,
-            patient_id=blank_phone_patient.ccmdd_patient_id,
+            facility_id=999,
+            patient_id=no_facility_patient.ccmdd_patient_id,
             patient_phone="0820000002",
             department_id=1,
             return_dates=[],
@@ -962,8 +962,76 @@ class SyncNewPatientsToTurnTests(TestCase):
             sync_new_patients_to_turn()
 
         turn_client.import_contacts.assert_not_called()
-        blank_phone_patient.refresh_from_db()
-        self.assertFalse(blank_phone_patient.invite_sent)
+        no_facility_patient.refresh_from_db()
+        self.assertFalse(no_facility_patient.invite_sent)
+
+    def test_sync_new_patients_to_turn_imports_patients_with_fallback_facility(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="new-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=1,
+            name="Clinic A",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-old",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-20"}],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-new",
+            date_created=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+            patch(
+                "synch.tasks.django_timezone.now",
+                return_value=datetime(2026, 4, 21, 10, 11, 12, tzinfo=timezone.utc),
+            ),
+        ):
+            sync_new_patients_to_turn()
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27820000002",
+                    "synch_new_user": "2026-04-21T10:11:12+00:00",
+                }
+            ]
+        )
+        patient.refresh_from_db()
+        self.assertTrue(patient.invite_sent)
 
     def test_sync_new_patients_to_turn_skips_turn_when_no_new_patients(
         self,
@@ -1325,6 +1393,136 @@ class SyncAppointmentDatesToTurnTests(TestCase):
                     "synch_appointment_facility_name": "",
                     "synch_appointment_facility_latitude": "",
                     "synch_appointment_facility_longitude": "",
+                }
+            ]
+        )
+
+    def test_sync_appointment_dates_to_turn_uses_fallback_facility(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-fallback-facility",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=123,
+            name="Clinic A",
+            latitude="-26.2041",
+            longitude="28.0473",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-old",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=123,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-20"}],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-new",
+            date_created=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=123,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+        ):
+            sync_appointment_dates_to_turn()
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27820000002",
+                    "synch_next_appointment_date": "",
+                    "synch_appointment_facility_name": "Clinic A",
+                    "synch_appointment_facility_latitude": "-26.2041",
+                    "synch_appointment_facility_longitude": "28.0473",
+                }
+            ]
+        )
+
+    def test_sync_appointment_dates_to_turn_falls_back_when_future_date_lacks_usable_facility(  # noqa: E501
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-missing-upcoming-facility",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=123,
+            name="Clinic A",
+            latitude="-26.2041",
+            longitude="28.0473",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-fallback",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=123,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-future-missing-facility",
+            date_created=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=999,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-22"}],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+        ):
+            sync_appointment_dates_to_turn()
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27820000002",
+                    "synch_next_appointment_date": "",
+                    "synch_appointment_facility_name": "Clinic A",
+                    "synch_appointment_facility_latitude": "-26.2041",
+                    "synch_appointment_facility_longitude": "28.0473",
                 }
             ]
         )

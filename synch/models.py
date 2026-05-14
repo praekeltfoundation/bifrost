@@ -41,6 +41,7 @@ class UpcomingAppointment:
 class PatientTurnSyncDetails:
     messaging_phone_number: str | None
     upcoming_appointment: UpcomingAppointment | None
+    messaging_facility: Facility | None
 
 
 class Patient(models.Model):
@@ -77,17 +78,53 @@ class Patient(models.Model):
         return None
 
     def get_upcoming_appointment(self, today: date) -> UpcomingAppointment | None:
-        candidates: list[UpcomingAppointment] = []
         prescriptions = list(self.prescriptions)
+        facilities_by_id = self._get_facilities_by_id(prescriptions)
+        return self._get_upcoming_appointment_from_prescriptions(
+            today,
+            prescriptions,
+            facilities_by_id,
+        )
+
+    def get_turn_sync_details(self, today: date) -> PatientTurnSyncDetails:
+        prescriptions = list(self.prescriptions)
+        facilities_by_id = self._get_facilities_by_id(prescriptions)
+        upcoming_appointment = self._get_upcoming_appointment_from_prescriptions(
+            today,
+            prescriptions,
+            facilities_by_id,
+        )
+        return PatientTurnSyncDetails(
+            messaging_phone_number=self.messaging_phone_number,
+            upcoming_appointment=upcoming_appointment,
+            messaging_facility=self._get_messaging_facility_for_turn_sync(
+                prescriptions,
+                facilities_by_id,
+                upcoming_appointment,
+            ),
+        )
+
+    def _get_facilities_by_id(
+        self,
+        prescriptions: list[Prescription],
+    ) -> dict[int, Facility]:
         facility_ids = {
             prescription.facility_id
             for prescription in prescriptions
             if prescription.facility_id is not None
         }
-        facilities_by_id = {
+        return {
             facility.ccmdd_facility_id: facility
             for facility in Facility.objects.filter(ccmdd_facility_id__in=facility_ids)
         }
+
+    def _get_upcoming_appointment_from_prescriptions(
+        self,
+        today: date,
+        prescriptions: list[Prescription],
+        facilities_by_id: dict[int, Facility],
+    ) -> UpcomingAppointment | None:
+        candidates: list[UpcomingAppointment] = []
 
         for prescription in prescriptions:
             facility = prescription.get_messaging_facility(
@@ -117,11 +154,23 @@ class Patient(models.Model):
             ),
         )
 
-    def get_turn_sync_details(self, today: date) -> PatientTurnSyncDetails:
-        return PatientTurnSyncDetails(
-            messaging_phone_number=self.messaging_phone_number,
-            upcoming_appointment=self.get_upcoming_appointment(today),
-        )
+    def _get_messaging_facility_for_turn_sync(
+        self,
+        prescriptions: list[Prescription],
+        facilities_by_id: dict[int, Facility],
+        upcoming_appointment: UpcomingAppointment | None,
+    ) -> Facility | None:
+        if upcoming_appointment is not None:
+            return upcoming_appointment.facility
+
+        for prescription in reversed(prescriptions):
+            facility = prescription.get_messaging_facility(
+                facilities_by_id=facilities_by_id
+            )
+            if facility is not None:
+                return facility
+
+        return None
 
 
 class Prescription(models.Model):

@@ -9,7 +9,7 @@ A person synced from SyNCH CCMDD whose records may be imported into Turn.
 _Avoid_: contact, user, member
 
 **Facility**:
-A CCMDD service location attached to an appointment and used in patient messaging; it must have a non-blank name to be usable in messaging.
+A CCMDD service location used in patient messaging; it may come from an appointment-bearing prescription or, when no future appointment exists, from the most recent prescription with a usable facility name.
 _Avoid_: clinic data, site payload
 
 **Upcoming Appointment**:
@@ -17,7 +17,7 @@ The earliest future-facing appointment date on or after today that belongs to a 
 _Avoid_: return date, next script date
 
 **New-Patient Eligible**:
-A **Patient** who has a usable phone number and an **Upcoming Appointment**.
+A **Patient** who has a usable phone number and enough facility context to send the one-time invite, even if they do not currently have an **Upcoming Appointment**.
 _Avoid_: unsent invite, new patient
 
 **Messaging Phone Number**:
@@ -49,8 +49,9 @@ _Avoid_: suppression reason field, latest delivery error
 - A **Patient** may have many prescriptions
 - A **Patient** may have at most one current **Messaging Phone Number**
 - A **Patient** may map to different **Turn Contact** records over time as their **Messaging Phone Number** changes
-- A **Patient** is **New-Patient Eligible** only when they have an **Upcoming Appointment**
+- A **Patient** may be **New-Patient Eligible** even when they have no **Upcoming Appointment**
 - A **Patient** is **New-Patient Eligible** only when they have a **Messaging Phone Number**
+- A **Patient** is **New-Patient Eligible** only when they also have a usable **Facility**
 - A **Patient** may become not **New-Patient Eligible** after being **Invite Sent**
 - An **Upcoming Appointment** belongs to exactly one prescription
 - An **Upcoming Appointment** must resolve to exactly one usable **Facility**
@@ -60,13 +61,13 @@ _Avoid_: suppression reason field, latest delivery error
 - A **Reminder Suppressed** **Turn Contact** keeps its original **Suppression Origin Message** even if later permanent delivery failures occur
 - A permanent delivery failure on a shared WhatsApp line is treated as evidence that SynCH reminders to the same **Turn Contact** will also fail, even if the failed message came from another service
 - All Turn messaging updates for a **Patient** use the **Messaging Phone Number**
-- Turn appointment fields should always reflect the **Upcoming Appointment**
+- Turn facility fields may fall back globally to the most recent usable **Facility** whenever no usable **Upcoming Appointment** exists
 - A usable **Facility** must have a non-blank name; coordinates are optional
 
 ## Example dialogue
 
 > **Dev:** "This patient has a return date next week, so should we mark them as new?"
-> **Domain expert:** "Only if that appointment resolves to a **Facility** and we still have a **Messaging Phone Number**; otherwise they are not **New-Patient Eligible** yet, even if they may later become eligible."
+> **Domain expert:** "A future appointment still drives the appointment date, but invite eligibility is broader: if we have a **Messaging Phone Number** and enough facility context for the invite, they can still be **New-Patient Eligible** even without an **Upcoming Appointment**."
 
 ## Flagged ambiguities
 
