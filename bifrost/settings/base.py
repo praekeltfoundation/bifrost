@@ -50,7 +50,10 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "drf_spectacular",
     "lock.apps.LockConfig",
+    "rest_framework",
+    "rest_framework.authtoken",
     "synch.apps.SynchConfig",
 ]
 
@@ -133,6 +136,16 @@ USE_TZ = True
 STATIC_ROOT = BASE_DIR / "static"
 STATIC_URL = "static/"
 
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    },
+    "otp_delivery_throttle": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "otp_delivery_throttle_cache",
+    },
+}
+
 CELERY_BROKER_URL = env(
     "CELERY_BROKER_URL",
     default="amqp://guest:guest@localhost:5672//",
@@ -150,6 +163,36 @@ CCMDD_USERNAME = env("CCMDD_USERNAME", default="")
 CCMDD_PASSWORD = env("CCMDD_PASSWORD", default="")
 TURN_BASE_URL = env("TURN_BASE_URL", default="")
 TURN_TOKEN = env("TURN_TOKEN", default="")
+TURN_OTP_TOKEN = env("TURN_OTP_TOKEN", default="")
+TURN_OTP_TEMPLATE_NAMESPACE = env("TURN_OTP_TEMPLATE_NAMESPACE", default="")
+TURN_OTP_TEMPLATE_NAME = env("TURN_OTP_TEMPLATE_NAME", default="")
+TURN_OTP_TEMPLATE_LANGUAGE = env("TURN_OTP_TEMPLATE_LANGUAGE", default="")
+OTP_DELIVERY_THROTTLE_RATE = env("OTP_DELIVERY_THROTTLE_RATE", default="6/h")
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "otp_delivery": OTP_DELIVERY_THROTTLE_RATE,
+    },
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Bifrost API",
+    "DESCRIPTION": (
+        "OTP delivery API for sending WhatsApp authentication template messages "
+        "through Turn. Temporary upstream failures can have unknown delivery "
+        "outcome, so retries may duplicate delivery."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "AUTHENTICATION_WHITELIST": [
+        "rest_framework.authentication.TokenAuthentication",
+    ],
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
