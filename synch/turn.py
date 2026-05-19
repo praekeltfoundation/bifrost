@@ -7,9 +7,10 @@ from random import uniform
 from time import sleep
 from urllib.parse import urljoin
 
-from requests import HTTPError, RequestException, Session
+from requests import HTTPError, RequestException, Session, Timeout
 
 REQUEST_TIMEOUT_SECONDS = 30
+OTP_REQUEST_TIMEOUT_SECONDS = 10
 RETRY_LIMIT = 5
 TURN_CONTACTS_CSV_MAX_BYTES = 1024 * 1024
 
@@ -25,6 +26,18 @@ class TurnRetryExhausted(TurnAPIError):
 
 
 class TurnRowTooLargeError(TurnAPIError):
+    pass
+
+
+class TurnOTPAPIError(Exception):
+    pass
+
+
+class TurnOTPUpstreamError(TurnOTPAPIError):
+    pass
+
+
+class TurnOTPTimeoutError(TurnOTPAPIError):
     pass
 
 
@@ -181,3 +194,87 @@ class TurnAPIClient:
             return max(float(retry_after), 0.0)
         except ValueError:
             return None
+
+
+class TurnOTPAPIClient:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        token: str,
+        template_namespace: str,
+        template_name: str,
+        template_language: str,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.template_namespace = template_namespace
+        self.template_name = template_name
+        self.template_language = template_language
+        self.session = Session()
+        self.session.headers.update(
+            {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.v1+json",
+                "Content-Type": "application/json",
+            }
+        )
+
+    def send_authentication_template_message(self, *, msisdn: str, otp: str) -> str:
+        try:
+            response = self.session.request(
+                method="POST",
+                url=urljoin(self.base_url, "/v1/messages"),
+                json={
+                    "to": msisdn,
+                    "type": "template",
+                    "template": {
+                        "namespace": self.template_namespace,
+                        "name": self.template_name,
+                        "language": {
+                            "code": self.template_language,
+                            "policy": "deterministic",
+                        },
+                        "components": [
+                            {
+                                "type": "body",
+                                "parameters": [{"type": "text", "text": otp}],
+                            },
+                            {
+                                "type": "button",
+                                "sub_type": "url",
+                                "index": "0",
+                                "parameters": [{"type": "text", "text": otp}],
+                            },
+                        ],
+                    },
+                },
+                timeout=OTP_REQUEST_TIMEOUT_SECONDS,
+            )
+        except RequestException as exc:
+            if isinstance(exc, HTTPError):
+                raise TurnOTPUpstreamError("Turn OTP request failed.") from exc
+            if isinstance(exc, Timeout):
+                raise TurnOTPTimeoutError("Turn OTP request timed out.") from exc
+            raise TurnOTPUpstreamError("Turn OTP request failed.") from exc
+
+        try:
+            response.raise_for_status()
+        except HTTPError as exc:
+            raise TurnOTPUpstreamError(
+                f"Turn OTP request failed with status {response.status_code}."
+            ) from exc
+
+        try:
+            payload = response.json()
+            message_id = payload["messages"][0]["id"]
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise TurnOTPUpstreamError(
+                "Turn OTP response did not include a provider message ID."
+            ) from exc
+
+        if not isinstance(message_id, str) or not message_id:
+            raise TurnOTPUpstreamError(
+                "Turn OTP response did not include a provider message ID."
+            )
+
+        return message_id
