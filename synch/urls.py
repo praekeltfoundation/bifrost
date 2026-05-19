@@ -1,7 +1,11 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
-from . import views
+from . import api_views
+
+router = DefaultRouter()
+router.register(r"otp", api_views.SendOTPViewSet, basename="otp")
 
 urlpatterns = [
-    path("health", views.health, name="health"),
+    path("v1/", include(router.urls)),
 ]
