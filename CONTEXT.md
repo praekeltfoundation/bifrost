@@ -28,6 +28,26 @@ _Avoid_: latest prescription phone, raw patient phone
 The messaging-system contact identified by a single WhatsApp phone number and controlled through Turn contact fields.
 _Avoid_: patient, person
 
+**OTP Delivery Request**:
+A request from SyNCH to send a one-time-passcode WhatsApp template message to a **Turn Contact** identified only by phone number.
+_Avoid_: patient verification, user signup, OTP record
+
+**API Caller**:
+The authenticated Django user account whose token authorises an inbound **OTP Delivery Request**.
+_Avoid_: patient, recipient, Turn Contact
+
+**Delivery Protection**:
+Messaging-side safeguards that may reject or slow **OTP Delivery Requests** to protect channel health, independent of OTP validity policy.
+_Avoid_: OTP expiry, resend policy, verification rules
+
+**Provider Message ID**:
+The messaging-provider identifier returned when an **OTP Delivery Request** is accepted for downstream delivery.
+_Avoid_: patient id, OTP id, verification id
+
+**Unknown Delivery Outcome**:
+A temporary upstream failure state where Bifrost cannot tell whether the messaging provider accepted an **OTP Delivery Request**.
+_Avoid_: guaranteed failure, duplicate-proof retry
+
 **Invite Sent**:
 A historical state meaning the patient has already received the one-time invite and must not be invited again.
 _Avoid_: currently eligible, active invite
@@ -56,6 +76,13 @@ _Avoid_: suppression reason field, latest delivery error
 - An **Upcoming Appointment** belongs to exactly one prescription
 - An **Upcoming Appointment** must resolve to exactly one usable **Facility**
 - A **Turn Contact** corresponds to exactly one WhatsApp phone number
+- An **OTP Delivery Request** targets exactly one **Turn Contact**
+- An **OTP Delivery Request** does not require a **Patient**
+- An **OTP Delivery Request** is authorised by exactly one **API Caller**
+- **Delivery Protection** may reject an **OTP Delivery Request** even when the caller's OTP policy would otherwise allow it
+- **Delivery Protection** for OTP sending is separate from **Reminder Suppressed**
+- A successful **OTP Delivery Request** may produce one **Provider Message ID**
+- A temporary upstream failure may leave an **OTP Delivery Request** in **Unknown Delivery Outcome**
 - A **Turn Contact** may become **Reminder Suppressed** for reasons other than delivery failure
 - **Delivery-Failure Provenance** is distinct from the general **Reminder Suppressed** state
 - A **Reminder Suppressed** **Turn Contact** keeps its original **Suppression Origin Message** even if later permanent delivery failures occur
@@ -73,5 +100,11 @@ _Avoid_: suppression reason field, latest delivery error
 
 - "new patient" was used to mean both a newly synced **Patient** and a **New-Patient Eligible** patient — resolved: messaging should use **New-Patient Eligible**
 - "latest phone number" was used to mean the newest stored phone value, even when unusable — resolved: messaging should use the most recent valid **Messaging Phone Number**
+- "user" was used for pre-sync OTP recipients — resolved: use **Turn Contact** for the recipient and **OTP Delivery Request** for the API call
+- "user" was used for inbound authentication — resolved: use **API Caller** for the authenticated Django principal
+- `429` could be read as OTP resend policy — resolved: use **Delivery Protection** for Bifrost-side channel safeguards and keep OTP lifecycle ownership in SyNCH
+- reminder suppression could be read as a general messaging block — resolved: OTP **Delivery Protection** and **Reminder Suppressed** are separate mechanisms
+- echoed `msisdn` could be treated as the response identifier — resolved: prefer **Provider Message ID** over returning phone number in success responses
+- upstream timeout could be read as a definite non-send — resolved: treat it as **Unknown Delivery Outcome**
 - `invite_sent` could be read as current eligibility — resolved: **Invite Sent** is a one-way historical state
 - "opted out" was used for delivery-triggered reminder disabling — resolved: use **Reminder Suppressed** unless the user explicitly withdrew consent

@@ -42,6 +42,14 @@ The post-sync Turn import uses these settings:
 - `TURN_BASE_URL`
 - `TURN_TOKEN`
 
+The OTP delivery API uses these settings:
+
+- `TURN_OTP_TOKEN`
+- `TURN_OTP_TEMPLATE_NAMESPACE`
+- `TURN_OTP_TEMPLATE_NAME`
+- `TURN_OTP_TEMPLATE_LANGUAGE`
+- `OTP_DELIVERY_THROTTLE_RATE`
+
 This repo also contains standalone Turn.io Lua apps under `turn_apps/`. They are separate deployables from Django with their own tests and packaging.
 
 Current Turn app:
@@ -75,6 +83,8 @@ Celery Beat schedules CCMDD synchronization once per day at `00:00` UTC. The sch
 Useful local URLs:
 
 - App health endpoint: `http://127.0.0.1:8000/health`
+- API schema: `http://127.0.0.1:8000/api/schema/`
+- Swagger docs: `http://127.0.0.1:8000/api/docs/`
 - Django admin: `http://127.0.0.1:8000/admin/`
 
 ## Configuration
@@ -133,6 +143,7 @@ uv run ./manage.py test
 
 - [Lock app](docs/lock.md)
 - [CCMDD client](docs/ccmdd-client.md)
+- [OTP delivery API](docs/otp-api.md)
 - [Turn client](docs/turn-client.md)
 - [Tasks](docs/tasks.md)
 - [SynCH delivery failures Turn app](turn_apps/synch_delivery_failures/README.md)
