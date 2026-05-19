@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import Any
 
 import phonenumbers
+from django.contrib.auth.models import User
 from django.db import models
 
 
@@ -124,6 +125,14 @@ class Patient(models.Model):
         )
 
 
+class APIUser(User):
+    class Meta:
+        proxy = True
+        permissions = (("send_otp", "Can send OTP delivery requests"),)
+        verbose_name = "API user"
+        verbose_name_plural = "API users"
+
+
 class Prescription(models.Model):
     ccmdd_prescription_id: models.CharField[str, str] = models.CharField(
         max_length=255,
@@ -131,7 +140,7 @@ class Prescription(models.Model):
     )
     date_created: models.DateTimeField[datetime, datetime] = models.DateTimeField()
     date_updated: models.DateTimeField[datetime, datetime] = models.DateTimeField()
-    facility_id: models.IntegerField[int, int] = models.IntegerField(
+    facility_id: models.IntegerField[int | None, int | None] = models.IntegerField(
         null=True,
         blank=True,
     )
@@ -140,7 +149,7 @@ class Prescription(models.Model):
         max_length=255,
         blank=True,
     )
-    department_id: models.IntegerField[int, int] = models.IntegerField(
+    department_id: models.IntegerField[int | None, int | None] = models.IntegerField(
         null=True,
         blank=True,
     )
