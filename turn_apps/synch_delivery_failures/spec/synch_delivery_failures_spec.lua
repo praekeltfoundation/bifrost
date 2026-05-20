@@ -12,6 +12,11 @@ describe("synch_delivery_failures", function()
     local loaded_assets
     local set_delivery_error_subscriptions_spy
     local update_contact_details_spy
+    local manifest_install_calls
+    local last_installed_manifest
+    local manifest_uninstall_calls
+    local last_uninstalled_manifest
+    local last_uninstall_options
 
     local function make_contact(fields)
         local copied_fields = {}
@@ -84,12 +89,52 @@ describe("synch_delivery_failures", function()
         update_results = {}
         loaded_assets = {
             ["README.md"] = "# SynCH delivery failures",
+            ["manifest.json"] = [[
+{
+  "app": {
+    "name": "synch_delivery_failures",
+    "version": "0.1.0",
+    "title": "SynCH delivery failures"
+  },
+  "contact_fields": [
+    {
+      "type": "STRING",
+      "name": "synch_delivery_failure_message_id",
+      "display": "synch_delivery_failure_message_id",
+      "private": true
+    }
+  ],
+  "media_assets": [],
+  "journeys": [],
+  "templates": [],
+  "flows": []
+}
+]],
         }
+        manifest_install_calls = 0
+        last_installed_manifest = nil
+        manifest_uninstall_calls = 0
+        last_uninstalled_manifest = nil
+        last_uninstall_options = nil
 
         set_delivery_error_subscriptions_spy = turn.test.spy(function(codes)
             return subscription_result.success, subscription_result.reason
         end)
         turn.app.set_delivery_error_subscriptions = set_delivery_error_subscriptions_spy
+
+        turn.manifest = turn.manifest or {}
+        turn.manifest.install = function(manifest)
+            manifest_install_calls = manifest_install_calls + 1
+            last_installed_manifest = manifest
+            return { success = true }
+        end
+
+        turn.manifest.uninstall = function(manifest, options)
+            manifest_uninstall_calls = manifest_uninstall_calls + 1
+            last_uninstalled_manifest = manifest
+            last_uninstall_options = options
+            return { success = true }
+        end
 
         update_contact_details_spy = turn.test.spy(function(contact, details)
             local result = table.remove(update_results, 1)
@@ -122,6 +167,11 @@ describe("synch_delivery_failures", function()
             local subscriptions = set_delivery_error_subscriptions_spy.calls[1].vals[1]
 
             assert(result == true)
+            assert(loaded_assets["manifest.json"] ~= nil)
+            assert(manifest_install_calls == 1)
+            assert(last_installed_manifest.app.name == "synch_delivery_failures")
+            assert(#last_installed_manifest.contact_fields == 1)
+            assert(last_installed_manifest.contact_fields[1].name == "synch_delivery_failure_message_id")
             assert(#subscriptions == 2)
             assert(subscriptions[1] == 131026)
             assert(subscriptions[2] == 131050)
@@ -155,6 +205,11 @@ describe("synch_delivery_failures", function()
             local subscriptions = set_delivery_error_subscriptions_spy.calls[1].vals[1]
 
             assert(result == true)
+            assert(manifest_uninstall_calls == 1)
+            assert(last_uninstalled_manifest.app.name == "synch_delivery_failures")
+            assert(#last_uninstalled_manifest.contact_fields == 1)
+            assert(last_uninstalled_manifest.contact_fields[1].name == "synch_delivery_failure_message_id")
+            assert(last_uninstall_options == nil)
             assert(#subscriptions == 0)
         end)
     end)
