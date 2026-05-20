@@ -4,8 +4,10 @@ Standalone Turn.io Lua app for permanent WhatsApp delivery failures on SynCH con
 
 ## Behavior
 
+- Installs manifest-defined app resources from `assets/manifest.json` on `install`, `config_changed`, `upgrade`, and `downgrade`.
 - Subscribes to delivery errors `131026` and `131050`.
 - Reapplies the same delivery-error subscriptions on `config_changed`, `upgrade`, and `downgrade`.
+- Uninstalls manifest-defined resources on `uninstall` before clearing delivery-error subscriptions.
 - Clears delivery-error subscriptions on `uninstall`.
 - Sets `synch_reminders` to `"false"` when a supported delivery error arrives for a contact that is not yet suppressed.
 - Records the first delivery-failure message ID in `synch_delivery_failure_message_id`.
