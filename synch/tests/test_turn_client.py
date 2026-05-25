@@ -232,3 +232,84 @@ class TurnAPIClientTests(SimpleTestCase):
 
         with self.assertRaises(TurnRowTooLargeError):
             client.import_contacts([{"urn": "+27123456789", "name": oversized_name}])
+
+    def test_update_contact_profile_patches_expected_payload(self):
+        session = Mock()
+        session.request.return_value = self.make_response()
+        client = self.make_client(session=session)
+
+        client.update_contact_profile(
+            contact_id="27123456789",
+            fields={
+                "sync_reminders": "True",
+                "contact_ndoh_privacy_policy": "true",
+            },
+        )
+
+        session.request.assert_called_once_with(
+            method="PATCH",
+            url="https://whatsapp.turn.io/v1/contacts/27123456789/profile",
+            json={
+                "sync_reminders": "True",
+                "contact_ndoh_privacy_policy": "true",
+            },
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+
+    def test_send_template_message_posts_expected_payload(self):
+        session = Mock()
+        response = self.make_response()
+        response.json.return_value = {"messages": [{"id": "wamid.123"}]}
+        session.request.return_value = response
+        client = self.make_client(session=session)
+
+        message_id = client.send_template_message(
+            msisdn="+27123456789",
+            template_namespace="template-namespace",
+            template_name="template-name",
+            template_language="en",
+            body_parameters=["Facility Name"],
+        )
+
+        self.assertEqual(message_id, "wamid.123")
+        session.request.assert_called_once_with(
+            method="POST",
+            url="https://whatsapp.turn.io/v1/messages",
+            json={
+                "to": "+27123456789",
+                "type": "template",
+                "template": {
+                    "namespace": "template-namespace",
+                    "name": "template-name",
+                    "language": {
+                        "code": "en",
+                        "policy": "deterministic",
+                    },
+                    "components": [
+                        {
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": "Facility Name"},
+                            ],
+                        }
+                    ],
+                },
+            },
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+
+    def test_send_template_message_raises_for_missing_provider_message_id(self):
+        session = Mock()
+        response = self.make_response()
+        response.json.return_value = {}
+        session.request.return_value = response
+        client = self.make_client(session=session)
+
+        with self.assertRaises(TurnAPIError):
+            client.send_template_message(
+                msisdn="+27123456789",
+                template_namespace="template-namespace",
+                template_name="template-name",
+                template_language="en",
+                body_parameters=["Facility Name"],
+            )

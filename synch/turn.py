@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from io import StringIO
 from random import uniform
 from time import sleep
@@ -72,6 +72,68 @@ class TurnAPIClient:
             errors.extend(self._extract_error_rows(response.text))
         return errors
 
+    def update_contact_profile(
+        self,
+        *,
+        contact_id: str,
+        fields: Mapping[str, str],
+    ) -> None:
+        self._request(
+            method="PATCH",
+            url=urljoin(self.base_url, f"/v1/contacts/{contact_id}/profile"),
+            json=dict(fields),
+        )
+
+    def send_template_message(
+        self,
+        *,
+        msisdn: str,
+        template_namespace: str,
+        template_name: str,
+        template_language: str,
+        body_parameters: Sequence[str],
+    ) -> str:
+        response = self._request(
+            method="POST",
+            url=urljoin(self.base_url, "/v1/messages"),
+            json={
+                "to": msisdn,
+                "type": "template",
+                "template": {
+                    "namespace": template_namespace,
+                    "name": template_name,
+                    "language": {
+                        "code": template_language,
+                        "policy": "deterministic",
+                    },
+                    "components": [
+                        {
+                            "type": "body",
+                            "parameters": [
+                                {"type": "text", "text": value}
+                                for value in body_parameters
+                            ],
+                        }
+                    ],
+                },
+            },
+        )
+
+        try:
+            payload = response.json()
+            message_id = payload["messages"][0]["id"]
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise TurnAPIError(
+                "Turn template response did not include a provider message ID."
+            ) from exc
+
+        if not isinstance(message_id, str) or not message_id:
+            raise TurnAPIError(
+                "Turn template response did not include a provider message ID."
+            )
+
+        return message_id
+
     def _get_fieldnames(self, rows: Sequence[dict[str, object]]) -> list[str]:
         fieldnames: list[str] = []
         seen: set[str] = set()
@@ -137,14 +199,41 @@ class TurnAPIClient:
         self,
         method: str,
         url: str,
-        data: bytes,
+        data: bytes | None = None,
+        json: Mapping[str, object] | None = None,
+        timeout: int = REQUEST_TIMEOUT_SECONDS,
     ):
         retry_attempt = 0
         while True:
             try:
-                response = self.session.request(
-                    method=method, url=url, data=data, timeout=REQUEST_TIMEOUT_SECONDS
-                )
+                if data is not None and json is not None:
+                    response = self.session.request(
+                        method=method,
+                        url=url,
+                        data=data,
+                        json=json,
+                        timeout=timeout,
+                    )
+                elif data is not None:
+                    response = self.session.request(
+                        method=method,
+                        url=url,
+                        data=data,
+                        timeout=timeout,
+                    )
+                elif json is not None:
+                    response = self.session.request(
+                        method=method,
+                        url=url,
+                        json=json,
+                        timeout=timeout,
+                    )
+                else:
+                    response = self.session.request(
+                        method=method,
+                        url=url,
+                        timeout=timeout,
+                    )
             except RequestException as exc:
                 if retry_attempt >= RETRY_LIMIT:
                     raise TurnRetryExhausted(
