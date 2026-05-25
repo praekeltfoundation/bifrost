@@ -52,6 +52,10 @@ _Avoid_: guaranteed failure, duplicate-proof retry
 A historical state meaning the patient has already received the one-time invite and must not be invited again.
 _Avoid_: currently eligible, active invite
 
+**Consent Backfill**:
+A one-off operation that updates a **Turn Contact** to reflect clinic-captured reminder consent that already exists outside WhatsApp.
+_Avoid_: unsuppress script, opt-in migration, reminder reset
+
 **Reminder Suppressed**:
 A messaging-side state meaning outbound reminders should not be sent to the patient until messaging is explicitly re-enabled by a human.
 _Avoid_: opted out, blocked user
@@ -76,6 +80,9 @@ _Avoid_: suppression reason field, latest delivery error
 - An **Upcoming Appointment** belongs to exactly one prescription
 - An **Upcoming Appointment** must resolve to exactly one usable **Facility**
 - A **Turn Contact** corresponds to exactly one WhatsApp phone number
+- A **Consent Backfill** targets one or more **Turn Contact** records
+- A **Consent Backfill** may set reminder-consent fields without changing whether a **Patient** is **Invite Sent**
+- A **Consent Backfill** may use a CSV export as its source of facility text when production patient state is unavailable locally
 - An **OTP Delivery Request** targets exactly one **Turn Contact**
 - An **OTP Delivery Request** does not require a **Patient**
 - An **OTP Delivery Request** is authorised by exactly one **API Caller**
@@ -104,6 +111,8 @@ _Avoid_: suppression reason field, latest delivery error
 - "user" was used for inbound authentication — resolved: use **API Caller** for the authenticated Django principal
 - `429` could be read as OTP resend policy — resolved: use **Delivery Protection** for Bifrost-side channel safeguards and keep OTP lifecycle ownership in SyNCH
 - reminder suppression could be read as a general messaging block — resolved: OTP **Delivery Protection** and **Reminder Suppressed** are separate mechanisms
+- "opt in" was used to mean both clinic-captured consent and a WhatsApp button press — resolved: use **Consent Backfill** for the one-off operation that mirrors existing clinic consent into Turn
+- Turn facility fields are normally derived from synced data, but this one-off reminder consent backfill may source the template facility name from the exported Turn CSV when local production sync data is unavailable
 - echoed `msisdn` could be treated as the response identifier — resolved: prefer **Provider Message ID** over returning phone number in success responses
 - upstream timeout could be read as a definite non-send — resolved: treat it as **Unknown Delivery Outcome**
 - `invite_sent` could be read as current eligibility — resolved: **Invite Sent** is a one-way historical state
