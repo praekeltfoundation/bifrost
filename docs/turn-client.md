@@ -1,14 +1,16 @@
 # Turn Client
 
-The sync app includes a small HTTP client for Turn's CSV contacts import API in `synch/turn.py`.
+The sync app includes a small HTTP client for Turn's contact and message APIs in `synch/turn.py`.
 
 ## Scope
 
-The client supports one Turn endpoint:
+The client supports three Turn endpoints:
 
 - `POST /v1/contacts`
+- `PATCH /v1/contacts/<contact_id>/profile`
+- `POST /v1/messages`
 
-It is intended for bulk contact create-or-update imports via CSV.
+It is intended for bulk contact create-or-update imports via CSV plus a narrow set of one-off contact profile updates and template sends.
 
 ## Usage
 
@@ -37,6 +39,30 @@ errors = client.import_contacts(
 The method returns a list of parsed error rows from Turn's streamed CSV response. Successful rows are ignored.
 
 The CCMDD sync tasks use this import path to update Turn contacts with a shared patient messaging phone number, appointment contact fields, and the `synch_new_user` contact field for invite-eligible patients.
+
+Update a single contact profile:
+
+```python
+client.update_contact_profile(
+    contact_id="27123456789",
+    fields={
+        "sync_reminders": "True",
+        "contact_ndoh_privacy_policy": "true",
+    },
+)
+```
+
+Send a templated message:
+
+```python
+message_id = client.send_template_message(
+    msisdn="+27123456789",
+    template_namespace="namespace",
+    template_name="template_name",
+    template_language="en",
+    body_parameters=["Facility Name"],
+)
+```
 
 ## Input shape
 
@@ -69,3 +95,17 @@ The client raises `TurnAPIError` subclasses for caller-visible failures:
 
 - `TurnRetryExhausted`: the request kept failing with temporary errors until the retry limit was exceeded
 - `TurnRowTooLargeError`: a single contact row is too large to fit into one CSV batch
+
+## Local Consent Backfill
+
+The repo includes a local-only management command for a one-off Turn reminder consent backfill:
+
+```bash
+uv run ./manage.py backfill_turn_consent /path/to/export.csv
+uv run ./manage.py backfill_turn_consent /path/to/export.csv --execute
+```
+
+- Without `--execute`, the command runs in preview mode and prints what it would do.
+- With `--execute`, it updates each Turn contact's `sync_reminders` and `contact_ndoh_privacy_policy` fields, then sends the hardcoded `synch_service_confirmation_6` template using the CSV `synch_appointment_facility_name` as the only body parameter.
+- It writes an outcome ledger next to the input CSV by default using the suffix `.turn_consent_backfill.csv`.
+- On rerun, rows already marked `success` in the ledger are skipped.
