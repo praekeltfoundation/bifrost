@@ -7,6 +7,7 @@ import sentry_sdk
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import caches
+from django.db.models import TextChoices
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiResponse,
@@ -28,6 +29,11 @@ from synch.phone_numbers import normalize_e164_phone_number
 from synch.turn import TurnOTPAPIClient, TurnOTPTimeoutError, TurnOTPUpstreamError
 
 logger = logging.getLogger(__name__)
+
+
+class OTPRecipientType(TextChoices):
+    PATIENT = "patient", "Patient"
+    SYNCH_USER = "synch_user", "SyNCH user"
 
 
 def get_turn_otp_client() -> TurnOTPAPIClient:
@@ -80,6 +86,13 @@ class SendOTPRequestSerializer(serializers.Serializer):
         trim_whitespace=False,
         help_text="OTP code to include in the template message.",
     )
+    recipient_type = serializers.ChoiceField(
+        choices=OTPRecipientType.choices,
+        help_text=(
+            "Business-role classification for this OTP recipient. Required but "
+            "does not change delivery behavior in the current version."
+        ),
+    )
     metadata = serializers.DictField(
         child=serializers.JSONField(),
         required=False,
@@ -119,6 +132,11 @@ class ValidationErrorResponseSerializer(serializers.Serializer):
         required=False,
         help_text="Validation messages for otp.",
     )
+    recipient_type = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        help_text="Validation messages for recipient_type.",
+    )
     metadata = serializers.ListField(
         child=serializers.CharField(),
         required=False,
@@ -150,6 +168,7 @@ class ValidationErrorResponseSerializer(serializers.Serializer):
                         value={
                             "msisdn": ["Enter a valid E.164 phone number."],
                             "otp": ["This field may not be blank."],
+                            "recipient_type": ['"invalid" is not a valid choice.'],
                             "metadata": ["Expected an object of key-value pairs."],
                         },
                         response_only=True,
@@ -242,6 +261,7 @@ class ValidationErrorResponseSerializer(serializers.Serializer):
                 value={
                     "msisdn": "+27831234567",
                     "otp": "493821",
+                    "recipient_type": "patient",
                     "metadata": {"source": "sync-qa"},
                 },
                 request_only=True,
@@ -268,6 +288,7 @@ class SendOTPViewSet(GenericViewSet):
 
         msisdn = serializer.validated_data["msisdn"]
         otp = serializer.validated_data["otp"]
+        recipient_type = serializer.validated_data["recipient_type"]
 
         try:
             message_id = get_turn_otp_client().send_authentication_template_message(
@@ -277,7 +298,8 @@ class SendOTPViewSet(GenericViewSet):
         except TurnOTPTimeoutError as error:
             sentry_sdk.capture_exception(error)
             logger.warning(
-                "Timed out sending OTP template to %s for API caller %s.",
+                "Timed out sending %s OTP template to %s for API caller %s.",
+                recipient_type,
                 msisdn,
                 request.user.get_username(),
             )
@@ -293,7 +315,8 @@ class SendOTPViewSet(GenericViewSet):
         except TurnOTPUpstreamError as error:
             sentry_sdk.capture_exception(error)
             logger.warning(
-                "Upstream OTP send failure for %s from API caller %s.",
+                "Upstream %s OTP send failure for %s from API caller %s.",
+                recipient_type,
                 msisdn,
                 request.user.get_username(),
             )
@@ -303,7 +326,8 @@ class SendOTPViewSet(GenericViewSet):
             )
 
         logger.info(
-            "Submitted OTP template message %s to %s for API caller %s.",
+            "Submitted %s OTP template message %s to %s for API caller %s.",
+            recipient_type,
             message_id,
             msisdn,
             request.user.get_username(),

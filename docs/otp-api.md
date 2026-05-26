@@ -22,6 +22,7 @@ Send JSON with:
 
 - `msisdn`: required E.164 WhatsApp phone number
 - `otp`: required non-empty string up to 15 characters
+- `recipient_type`: required string enum, one of `patient` or `synch_user`
 - `metadata`: optional object, accepted but ignored in v1
 
 Example:
@@ -30,11 +31,14 @@ Example:
 {
   "msisdn": "+27831234567",
   "otp": "493821",
+  "recipient_type": "patient",
   "metadata": {
     "source": "sync-qa"
   }
 }
 ```
+
+`recipient_type` classifies who the OTP is for. It is request-scoped, does not need to match a local patient record, and does not currently change delivery behavior. `synch_user` refers to the OTP recipient's role in SyNCH, not the authenticated API caller.
 
 ## Success response
 
