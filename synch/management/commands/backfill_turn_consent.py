@@ -11,7 +11,7 @@ from django.core.management.base import BaseCommand, CommandError
 from synch.turn import TurnAPIClient, TurnAPIError
 
 CONTACT_FIELDS = {
-    "sync_reminders": "True",
+    "synch_reminders": "True",
     "contact_ndoh_privacy_policy": "true",
 }
 TEMPLATE_NAMESPACE = "415838db_3c2c_481c_9468_c1ee97c3b2c5"

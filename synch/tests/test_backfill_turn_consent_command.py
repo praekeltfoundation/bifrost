@@ -91,7 +91,7 @@ class BackfillTurnConsentCommandTests(SimpleTestCase):
             client.update_contact_profile.assert_called_once_with(
                 contact_id="27123456789",
                 fields={
-                    "sync_reminders": "True",
+                    "synch_reminders": "True",
                     "contact_ndoh_privacy_policy": "true",
                 },
             )
@@ -217,7 +217,7 @@ class BackfillTurnConsentCommandTests(SimpleTestCase):
             client.update_contact_profile.assert_called_once_with(
                 contact_id="27987654321",
                 fields={
-                    "sync_reminders": "True",
+                    "synch_reminders": "True",
                     "contact_ndoh_privacy_policy": "true",
                 },
             )

@@ -66,7 +66,7 @@ class TurnAPIClientTests(SimpleTestCase):
             client.session.headers["Accept"],
             "application/vnd.v1+json",
         )
-        self.assertEqual(client.session.headers["Content-Type"], "text/csv")
+        self.assertNotIn("Content-Type", client.session.headers)
 
     def test_import_contacts_returns_empty_list_without_requests_for_empty_rows(self):
         session = Mock()
@@ -100,6 +100,7 @@ class TurnAPIClientTests(SimpleTestCase):
                 b"+27123456789,Peter,,\r\n"
                 b"+27123456790,,Parker,21\r\n"
             ),
+            headers={"Content-Type": "text/csv"},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
 
@@ -253,6 +254,7 @@ class TurnAPIClientTests(SimpleTestCase):
                 "sync_reminders": "True",
                 "contact_ndoh_privacy_policy": "true",
             },
+            headers={"Content-Type": "application/json"},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
 
@@ -295,6 +297,7 @@ class TurnAPIClientTests(SimpleTestCase):
                     ],
                 },
             },
+            headers={"Content-Type": "application/json"},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
 
