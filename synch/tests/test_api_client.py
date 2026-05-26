@@ -112,6 +112,46 @@ class CCMDDAPIClientTests(SimpleTestCase):
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
 
+    def test_iter_limited_patients_posts_with_prescription_date_updated_when_provided(
+        self,
+    ):
+        session = Mock()
+        session.request.return_value = self.make_response(
+            payload={
+                "result": 1,
+                "data": [{"id": "patient-1"}],
+            },
+        )
+        client = self.make_client(session=session)
+
+        items = list(
+            client.iter_limited_patients(
+                prescription_date_updated=datetime(2024, 1, 2, 3, 4, 5),
+            ),
+        )
+
+        self.assertEqual(items, [{"id": "patient-1"}])
+        session.request.assert_called_once_with(
+            method="POST",
+            url="https://test.ccmdd.org.za/wapi/patientLimited",
+            json={"prescription_date_updated": "2024-01-02 03:04:05.000000"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+
+    def test_iter_limited_patients_rejects_both_filters_at_once(self):
+        client = self.make_client()
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "Only one patient filter may be set per request.",
+        ):
+            list(
+                client.iter_limited_patients(
+                    date_updated=datetime(2024, 1, 2, 3, 4, 5),
+                    prescription_date_updated=datetime(2024, 1, 2, 3, 4, 5),
+                )
+            )
+
     def test_iter_facilities_gets_all_facilities(self):
         session = Mock()
         session.request.return_value = self.make_response(

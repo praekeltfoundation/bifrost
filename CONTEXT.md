@@ -8,6 +8,14 @@ Bifrost synchronises patient and appointment data from SyNCH CCMDD into local st
 A person synced from SyNCH CCMDD whose records may be imported into Turn.
 _Avoid_: contact, user, member
 
+**Complete Patient Delta**:
+The patient changeset Bifrost expects from SyNCH for each sync window: every **Patient** whose own record changed, plus every **Patient** whose relevant prescription changed, even if the patient row itself did not.
+_Avoid_: full patient snapshot, patient-only delta
+
+**Relevant Prescription Filter**:
+The upstream SyNCH rule that decides which patients appear on the limited patient endpoint based on prescription changes relevant to the integration; Bifrost depends on this filter for feed completeness but does not use it to decide messaging eligibility.
+_Avoid_: local eligibility rule, appointment rule
+
 **Facility**:
 A CCMDD service location used in patient messaging; it may come from an appointment-bearing prescription or, when no future appointment exists, from the most recent prescription with a usable facility name.
 _Avoid_: clinic data, site payload
@@ -71,6 +79,9 @@ _Avoid_: suppression reason field, latest delivery error
 ## Relationships
 
 - A **Patient** may have many prescriptions
+- A **Complete Patient Delta** may include a **Patient** whose own record did not change
+- A **Complete Patient Delta** must include a **Patient** whose relevant prescription changed
+- A **Relevant Prescription Filter** may change which **Patient** records appear in the upstream patient feed without changing Bifrost's own messaging rules
 - A **Patient** may have at most one current **Messaging Phone Number**
 - A **Patient** may map to different **Turn Contact** records over time as their **Messaging Phone Number** changes
 - A **Patient** may be **New-Patient Eligible** even when they have no **Upcoming Appointment**
@@ -106,6 +117,7 @@ _Avoid_: suppression reason field, latest delivery error
 ## Flagged ambiguities
 
 - "new patient" was used to mean both a newly synced **Patient** and a **New-Patient Eligible** patient — resolved: messaging should use **New-Patient Eligible**
+- "relevant prescription" could be read as Bifrost's own eligibility logic — resolved: use **Relevant Prescription Filter** for the upstream feed rule and keep local messaging decisions in Bifrost
 - "latest phone number" was used to mean the newest stored phone value, even when unusable — resolved: messaging should use the most recent valid **Messaging Phone Number**
 - "user" was used for pre-sync OTP recipients — resolved: use **Turn Contact** for the recipient and **OTP Delivery Request** for the API call
 - "user" was used for inbound authentication — resolved: use **API Caller** for the authenticated Django principal
