@@ -51,7 +51,6 @@ class TurnAPIClient:
             {
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.v1+json",
-                "Content-Type": "text/csv",
             }
         )
 
@@ -203,6 +202,12 @@ class TurnAPIClient:
         json: Mapping[str, object] | None = None,
         timeout: int = REQUEST_TIMEOUT_SECONDS,
     ):
+        headers = None
+        if data is not None:
+            headers = {"Content-Type": "text/csv"}
+        elif json is not None:
+            headers = {"Content-Type": "application/json"}
+
         retry_attempt = 0
         while True:
             try:
@@ -212,6 +217,7 @@ class TurnAPIClient:
                         url=url,
                         data=data,
                         json=json,
+                        headers=headers,
                         timeout=timeout,
                     )
                 elif data is not None:
@@ -219,6 +225,7 @@ class TurnAPIClient:
                         method=method,
                         url=url,
                         data=data,
+                        headers=headers,
                         timeout=timeout,
                     )
                 elif json is not None:
@@ -226,6 +233,7 @@ class TurnAPIClient:
                         method=method,
                         url=url,
                         json=json,
+                        headers=headers,
                         timeout=timeout,
                     )
                 else:
