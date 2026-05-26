@@ -17,9 +17,10 @@ It exists as a minimal Celery execution check so the project can verify that:
 
 - Celery Beat schedules it to run every 5 minutes.
 - It acquires the `sync-ccmdd` lock before starting, so only one full CCMDD sync run can proceed at a time.
-- It runs `sync_patients` first.
-- It runs `sync_facilities` second.
-- It runs `sync_prescriptions` third.
+- It runs `sync_facilities` first.
+- It captures the current prescription `date_updated` watermark before syncing prescriptions.
+- It runs `sync_prescriptions` second with that captured watermark.
+- It runs `sync_patients` third with the same captured prescription watermark.
 - It runs `sync_appointment_dates_to_turn` fourth.
 - It runs `sync_new_patients_to_turn` fifth.
 - It only proceeds to the next step if the previous step completed successfully.
@@ -30,18 +31,21 @@ It exists as a minimal Celery execution check so the project can verify that:
 
 `synch.tasks.sync_patients` incrementally synchronizes patients from the CCMDD API into the local database.
 
-- It reads the latest stored patient `date_updated` value from the local database, defaulting to the Unix epoch if there are no patients yet, as it is a required field for the API.
-- It calls `iter_limited_patients(date_updated=...)` to fetch updates from the CCMDD API.
+- The CCMDD patient endpoint is pre-filtered upstream by a relevant-prescription rule, so patient completeness depends on both patient-row updates and prescription-row updates.
+- It reads the latest stored patient `date_updated` value from the local database, defaulting to the Unix epoch if there are no patients yet.
+- It calls `iter_limited_patients(date_updated=...)` to fetch patients whose own rows changed.
+- It calls `iter_limited_patients(prescription_date_updated=...)` with the pre-run prescription watermark from `sync_all` to fetch patients whose relevant prescriptions changed, even if the patient row did not.
 - For each returned patient, it stores `id`, `date_created`, and `date_updated` in explicit model fields, and stores the remaining CCMDD patient fields in the `Patient.payload` JSON column.
 - If a patient already exists, it is updated instead of a new one being created.
-- It returns the pre-sync patient `date_updated` watermark so the top-level task can identify which patients were newly created during the run.
+- It allows inclusive watermark re-fetches and relies on idempotent upserts instead of trying to skip same-timestamp rows.
+- It logs separate counts for patient-row updates and prescription-triggered patient refreshes, plus a combined total.
 
 ## `sync_prescriptions`
 
 `synch.tasks.sync_prescriptions` incrementally synchronizes prescriptions from the CCMDD API into the local database.
 
-- It reads the latest stored prescription `date_updated` value from the local database, defaulting to the Unix epoch if there are no prescriptions yet.
-- It calls `iter_limited_prescriptions(date_updated=...)` to fetch updates from the CCMDD API.
+- It receives the pre-run prescription `date_updated` watermark from `sync_all`.
+- It calls `iter_limited_prescriptions(date_updated=...)` with that captured watermark to fetch the exact prescription window that the paired patient refresh will also use.
 - For each returned prescription, it stores `id`, `date_created`, `date_updated`, `facility_id`, `patient_id`, `patient_phone`, `department_id`, and `return_dates` in explicit model fields.
 - It stores every remaining CCMDD prescription field in the `Prescription.payload` JSON column.
 - If a prescription already exists, it is updated instead of a new one being created.

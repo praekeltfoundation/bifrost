@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from celery import shared_task
 from django.conf import settings
@@ -57,9 +58,14 @@ def sync_all() -> None:
 
     try:
         with transaction.atomic():
-            sync_patients(lock)
             sync_facilities(lock)
-            sync_prescriptions(lock)
+            prescription_date_updated = Prescription.objects.aggregate(
+                latest_date_updated=Max("date_updated")
+            )["latest_date_updated"]
+            if prescription_date_updated is None:
+                prescription_date_updated = EPOCH
+            sync_prescriptions(lock, date_updated=prescription_date_updated)
+            sync_patients(lock, prescription_date_updated=prescription_date_updated)
             sync_appointment_dates_to_turn(lock)
             sync_new_patients_to_turn(lock)
     finally:
@@ -67,7 +73,11 @@ def sync_all() -> None:
 
 
 @shared_task
-def sync_patients(lock: Lock | None = None) -> None:
+def sync_patients(
+    lock: Lock | None = None,
+    *,
+    prescription_date_updated: datetime,
+) -> None:
     latest_date_updated = Patient.objects.aggregate(
         latest_date_updated=Max("date_updated")
     )["latest_date_updated"]
@@ -75,39 +85,45 @@ def sync_patients(lock: Lock | None = None) -> None:
         latest_date_updated = EPOCH
     client = _get_client()
 
-    synced = 0
+    synced_by_patient_update = 0
+    synced_by_prescription_update = 0
 
     for record in client.iter_limited_patients(date_updated=latest_date_updated):
-        patient_id = record.pop("id")
-        date_created = _parse_ccmdd_timestamp(record.pop("date_created"))
-        date_updated = _parse_ccmdd_timestamp(record.pop("date_updated"))
-        Patient.objects.update_or_create(
-            ccmdd_patient_id=patient_id,
-            defaults={
-                "date_created": date_created,
-                "date_updated": date_updated,
-                "payload": record,
-            },
-        )
-        synced += 1
+        _upsert_patient_record(record)
+        synced_by_patient_update += 1
         if lock is not None:
             lock.refresh()
 
-    logger.info("Synced %s patients.", synced)
+    for record in client.iter_limited_patients(
+        prescription_date_updated=prescription_date_updated
+    ):
+        _upsert_patient_record(record)
+        synced_by_prescription_update += 1
+        if lock is not None:
+            lock.refresh()
+
+    logger.info("Synced %s patients by patient update.", synced_by_patient_update)
+    logger.info(
+        "Synced %s patients by prescription update.",
+        synced_by_prescription_update,
+    )
+    logger.info(
+        "Synced %s patients total.",
+        synced_by_patient_update + synced_by_prescription_update,
+    )
 
 
 @shared_task
-def sync_prescriptions(lock: Lock | None = None) -> None:
-    latest_date_updated = Prescription.objects.aggregate(
-        latest_date_updated=Max("date_updated")
-    )["latest_date_updated"]
-    if latest_date_updated is None:
-        latest_date_updated = EPOCH
+def sync_prescriptions(
+    lock: Lock | None = None,
+    *,
+    date_updated: datetime,
+) -> None:
     client = _get_client()
 
     synced = 0
 
-    for record in client.iter_limited_prescriptions(date_updated=latest_date_updated):
+    for record in client.iter_limited_prescriptions(date_updated=date_updated):
         prescription_id = record.pop("id")
         date_created = _parse_ccmdd_timestamp(record.pop("date_created"))
         date_updated = _parse_ccmdd_timestamp(record.pop("date_updated"))
@@ -134,6 +150,20 @@ def sync_prescriptions(lock: Lock | None = None) -> None:
             lock.refresh()
 
     logger.info("Synced %s prescriptions.", synced)
+
+
+def _upsert_patient_record(record: dict[str, Any]) -> None:
+    patient_id = record.pop("id")
+    date_created = _parse_ccmdd_timestamp(record.pop("date_created"))
+    date_updated = _parse_ccmdd_timestamp(record.pop("date_updated"))
+    Patient.objects.update_or_create(
+        ccmdd_patient_id=patient_id,
+        defaults={
+            "date_created": date_created,
+            "date_updated": date_updated,
+            "payload": record,
+        },
+    )
 
 
 @shared_task

@@ -64,10 +64,18 @@ class CCMDDAPIClient:
     def iter_limited_patients(
         self,
         date_updated: datetime | None = None,
+        prescription_date_updated: datetime | None = None,
     ) -> Iterator[dict[str, Any]]:
+        if date_updated is not None and prescription_date_updated is not None:
+            raise ValueError("Only one patient filter may be set per request.")
+
         filters = {}
         if date_updated is not None:
             filters["date_updated"] = date_updated.strftime("%Y-%m-%d %H:%M:%S.%f")
+        if prescription_date_updated is not None:
+            filters["prescription_date_updated"] = prescription_date_updated.strftime(
+                "%Y-%m-%d %H:%M:%S.%f"
+            )
         yield from self._iter_limited_records(
             endpoint_path="/wapi/patientLimited",
             filters=filters,

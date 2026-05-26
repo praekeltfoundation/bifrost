@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from celery.schedules import crontab
 from django.test import TestCase, override_settings
@@ -57,16 +57,13 @@ class CeleryTaskExecutionTests(TestCase):
         self.assertTrue(result.successful())
         self.assertEqual(result.get(), "OK")
 
-    def test_sync_all_runs_patient_sync_before_facility_sync_before_prescription_sync(
+    def test_sync_all_runs_facility_sync_before_prescription_sync_before_patient_sync(
         self,
     ):
         with (
-            patch(
-                "synch.tasks.sync_patients",
-                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
-            ) as sync_patients_mock,
             patch("synch.tasks.sync_facilities") as sync_facilities_mock,
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            patch("synch.tasks.sync_patients") as sync_patients_mock,
             patch(
                 "synch.tasks.sync_appointment_dates_to_turn"
             ) as sync_appointment_dates_to_turn_mock,
@@ -81,19 +78,23 @@ class CeleryTaskExecutionTests(TestCase):
         sync_appointment_dates_to_turn_mock.assert_called_once()
         sync_new_patients_to_turn.assert_called_once()
         self.assertIs(
-            sync_patients_mock.call_args.args[0],
             sync_facilities_mock.call_args.args[0],
-        )
-        self.assertIs(
-            sync_patients_mock.call_args.args[0],
             sync_prescriptions_mock.call_args.args[0],
         )
         self.assertIs(
+            sync_facilities_mock.call_args.args[0],
             sync_patients_mock.call_args.args[0],
+        )
+        self.assertIs(
+            sync_facilities_mock.call_args.args[0],
             sync_appointment_dates_to_turn_mock.call_args.args[0],
         )
+        self.assertEqual(
+            sync_prescriptions_mock.call_args.kwargs["date_updated"],
+            sync_patients_mock.call_args.kwargs["prescription_date_updated"],
+        )
 
-    def test_sync_all_does_not_run_facilities_or_prescriptions_when_patient_sync_fails(
+    def test_sync_all_does_not_run_turn_tasks_when_patient_sync_fails(
         self,
     ):
         with (
@@ -108,19 +109,16 @@ class CeleryTaskExecutionTests(TestCase):
         ):
             sync_all.delay()
 
-        sync_facilities_mock.assert_not_called()
-        sync_prescriptions_mock.assert_not_called()
+        sync_facilities_mock.assert_called_once()
+        sync_prescriptions_mock.assert_called_once()
         sync_appointment_dates_to_turn_mock.assert_not_called()
         sync_new_patients_to_turn.assert_not_called()
 
     def test_sync_all_does_not_run_prescriptions_when_facility_sync_fails(self):
         with (
-            patch(
-                "synch.tasks.sync_patients",
-                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
-            ),
             patch("synch.tasks.sync_facilities", side_effect=RuntimeError("boom")),
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
+            patch("synch.tasks.sync_patients") as sync_patients_mock,
             patch(
                 "synch.tasks.sync_appointment_dates_to_turn"
             ) as sync_appointment_dates_to_turn_mock,
@@ -130,17 +128,15 @@ class CeleryTaskExecutionTests(TestCase):
             sync_all.delay()
 
         sync_prescriptions_mock.assert_not_called()
+        sync_patients_mock.assert_not_called()
         sync_appointment_dates_to_turn_mock.assert_not_called()
         sync_new_patients_to_turn.assert_not_called()
 
     def test_sync_all_does_not_run_turn_tasks_when_prescription_sync_fails(self):
         with (
-            patch(
-                "synch.tasks.sync_patients",
-                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
-            ),
             patch("synch.tasks.sync_facilities"),
             patch("synch.tasks.sync_prescriptions", side_effect=RuntimeError("boom")),
+            patch("synch.tasks.sync_patients") as sync_patients_mock,
             patch(
                 "synch.tasks.sync_appointment_dates_to_turn"
             ) as sync_appointment_dates_to_turn_mock,
@@ -149,32 +145,28 @@ class CeleryTaskExecutionTests(TestCase):
         ):
             sync_all.delay()
 
+        sync_patients_mock.assert_not_called()
         sync_appointment_dates_to_turn_mock.assert_not_called()
         sync_new_patients_to_turn.assert_not_called()
 
     def test_sync_all_does_not_run_turn_sync_when_prescription_sync_fails(self):
         with (
-            patch(
-                "synch.tasks.sync_patients",
-                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
-            ),
             patch("synch.tasks.sync_facilities"),
             patch("synch.tasks.sync_prescriptions", side_effect=RuntimeError("boom")),
+            patch("synch.tasks.sync_patients") as sync_patients_mock,
             patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
             self.assertRaisesMessage(RuntimeError, "boom"),
         ):
             sync_all.delay()
 
+        sync_patients_mock.assert_not_called()
         sync_new_patients_to_turn.assert_not_called()
 
     def test_sync_all_propagates_turn_sync_errors(self):
         with (
-            patch(
-                "synch.tasks.sync_patients",
-                return_value=datetime(2026, 4, 1, tzinfo=timezone.utc),
-            ),
             patch("synch.tasks.sync_facilities"),
             patch("synch.tasks.sync_prescriptions"),
+            patch("synch.tasks.sync_patients"),
             patch(
                 "synch.tasks.sync_new_patients_to_turn",
                 side_effect=RuntimeError("boom"),
@@ -184,7 +176,9 @@ class CeleryTaskExecutionTests(TestCase):
             sync_all.delay()
 
     def test_sync_all_rolls_back_database_updates_when_a_later_step_fails(self):
-        def create_patient(lock: Lock) -> datetime:
+        def create_patient(
+            lock: Lock, *, prescription_date_updated: datetime
+        ) -> datetime:
             Patient.objects.create(
                 ccmdd_patient_id="patient-1",
                 date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
@@ -205,7 +199,7 @@ class CeleryTaskExecutionTests(TestCase):
                 payload={},
             )
 
-        def create_prescription(lock: Lock) -> None:
+        def create_prescription(lock: Lock, *, date_updated: datetime) -> None:
             Prescription.objects.create(
                 ccmdd_prescription_id="prescription-1",
                 patient_id="patient-1",
@@ -271,35 +265,48 @@ class CeleryTaskExecutionTests(TestCase):
 class SyncPatientsTaskTests(TestCase):
     def test_sync_patients_uses_epoch_date_updated_when_no_patients_exist(self):
         client = Mock()
-        client.iter_limited_patients.return_value = iter([])
+        client.iter_limited_patients.side_effect = [iter([]), iter([])]
 
         with patch("synch.tasks.CCMDDAPIClient", return_value=client):
-            sync_patients.delay()
+            sync_patients.delay(
+                prescription_date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+            )
 
-        client.iter_limited_patients.assert_called_once_with(
-            date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        self.assertEqual(
+            client.iter_limited_patients.call_args_list,
+            [
+                call(date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc)),
+                call(
+                    prescription_date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc)
+                ),
+            ],
         )
 
     def test_sync_patients_creates_records_and_strips_modeled_fields_from_payload(self):
         client = Mock()
-        client.iter_limited_patients.return_value = iter(
-            [
-                {
-                    "id": "90653BC3-DF69-E611-9D09-20689D5CEDFC",
-                    "date_created": "2016-04-08 12:48:15.000",
-                    "date_updated": "2016-04-29 11:25:28.000",
-                    "surname": "wer",
-                    "firstname": "wer",
-                    "gender": "1",
-                }
-            ]
-        )
+        client.iter_limited_patients.side_effect = [
+            iter(
+                [
+                    {
+                        "id": "90653BC3-DF69-E611-9D09-20689D5CEDFC",
+                        "date_created": "2016-04-08 12:48:15.000",
+                        "date_updated": "2016-04-29 11:25:28.000",
+                        "surname": "wer",
+                        "firstname": "wer",
+                        "gender": "1",
+                    }
+                ]
+            ),
+            iter([]),
+        ]
 
         with (
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_patients.delay()
+            sync_patients.delay(
+                prescription_date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+            )
 
         patient = Patient.objects.get()
         self.assertEqual(
@@ -310,10 +317,23 @@ class SyncPatientsTaskTests(TestCase):
             patient.payload,
             {"surname": "wer", "firstname": "wer", "gender": "1"},
         )
-        client.iter_limited_patients.assert_called_once_with(
-            date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        self.assertEqual(
+            client.iter_limited_patients.call_args_list,
+            [
+                call(date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc)),
+                call(
+                    prescription_date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc)
+                ),
+            ],
         )
-        self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 patients."])
+        self.assertEqual(
+            logs.output,
+            [
+                "INFO:synch.tasks:Synced 1 patients by patient update.",
+                "INFO:synch.tasks:Synced 0 patients by prescription update.",
+                "INFO:synch.tasks:Synced 1 patients total.",
+            ],
+        )
 
     def test_sync_patients_uses_latest_date_updated_for_incremental_sync(self):
         Patient.objects.create(
@@ -323,13 +343,23 @@ class SyncPatientsTaskTests(TestCase):
             payload={"surname": "old"},
         )
         client = Mock()
-        client.iter_limited_patients.return_value = iter([])
+        client.iter_limited_patients.side_effect = [iter([]), iter([])]
 
         with patch("synch.tasks.CCMDDAPIClient", return_value=client):
-            sync_patients.delay()
+            sync_patients.delay(
+                prescription_date_updated=datetime(2016, 4, 28, tzinfo=timezone.utc),
+            )
 
-        client.iter_limited_patients.assert_called_once_with(
-            date_updated=datetime(2016, 4, 29, 11, 25, 28, tzinfo=timezone.utc),
+        self.assertEqual(
+            client.iter_limited_patients.call_args_list,
+            [
+                call(
+                    date_updated=datetime(2016, 4, 29, 11, 25, 28, tzinfo=timezone.utc)
+                ),
+                call(
+                    prescription_date_updated=datetime(2016, 4, 28, tzinfo=timezone.utc)
+                ),
+            ],
         )
 
     def test_sync_patients_updates_existing_patient_by_ccmdd_id(self):
@@ -340,23 +370,28 @@ class SyncPatientsTaskTests(TestCase):
             payload={"surname": "old"},
         )
         client = Mock()
-        client.iter_limited_patients.return_value = iter(
-            [
-                {
-                    "id": "90653BC3-DF69-E611-9D09-20689D5CEDFC",
-                    "date_created": "2016-04-08 12:48:15.000",
-                    "date_updated": "2016-04-30 09:00:00.000",
-                    "surname": "new",
-                    "firstname": "updated",
-                }
-            ]
-        )
+        client.iter_limited_patients.side_effect = [
+            iter(
+                [
+                    {
+                        "id": "90653BC3-DF69-E611-9D09-20689D5CEDFC",
+                        "date_created": "2016-04-08 12:48:15.000",
+                        "date_updated": "2016-04-30 09:00:00.000",
+                        "surname": "new",
+                        "firstname": "updated",
+                    }
+                ]
+            ),
+            iter([]),
+        ]
 
         with (
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_patients.delay()
+            sync_patients.delay(
+                prescription_date_updated=datetime(2016, 4, 29, tzinfo=timezone.utc),
+            )
 
         patient = Patient.objects.get(
             ccmdd_patient_id="90653BC3-DF69-E611-9D09-20689D5CEDFC"
@@ -366,7 +401,57 @@ class SyncPatientsTaskTests(TestCase):
             patient.date_updated,
             datetime(2016, 4, 30, 9, 0, 0, tzinfo=timezone.utc),
         )
-        self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 patients."])
+        self.assertEqual(
+            logs.output,
+            [
+                "INFO:synch.tasks:Synced 1 patients by patient update.",
+                "INFO:synch.tasks:Synced 0 patients by prescription update.",
+                "INFO:synch.tasks:Synced 1 patients total.",
+            ],
+        )
+
+    def test_sync_patients_fetches_patients_by_prescription_watermark(self):
+        Patient.objects.create(
+            ccmdd_patient_id="existing-patient",
+            date_created=datetime(2016, 4, 8, 12, 48, 15, tzinfo=timezone.utc),
+            date_updated=datetime(2016, 4, 29, 11, 25, 28, tzinfo=timezone.utc),
+            payload={"surname": "old"},
+        )
+        client = Mock()
+        client.iter_limited_patients.side_effect = [
+            iter([]),
+            iter(
+                [
+                    {
+                        "id": "newly-relevant-patient",
+                        "date_created": "2016-04-08 12:48:15.000",
+                        "date_updated": "2016-04-08 12:48:15.000",
+                        "surname": "recovered",
+                    }
+                ]
+            ),
+        ]
+
+        with (
+            patch("synch.tasks.CCMDDAPIClient", return_value=client),
+            self.assertLogs("synch.tasks", level="INFO") as logs,
+        ):
+            sync_patients.delay(
+                prescription_date_updated=datetime(
+                    2016, 4, 30, 9, 0, 0, tzinfo=timezone.utc
+                ),
+            )
+
+        patient = Patient.objects.get(ccmdd_patient_id="newly-relevant-patient")
+        self.assertEqual(patient.payload, {"surname": "recovered"})
+        self.assertEqual(
+            logs.output,
+            [
+                "INFO:synch.tasks:Synced 0 patients by patient update.",
+                "INFO:synch.tasks:Synced 1 patients by prescription update.",
+                "INFO:synch.tasks:Synced 1 patients total.",
+            ],
+        )
 
 
 @override_settings(
@@ -384,7 +469,9 @@ class SyncPrescriptionsTaskTests(TestCase):
         client.iter_limited_prescriptions.return_value = iter([])
 
         with patch("synch.tasks.CCMDDAPIClient", return_value=client):
-            sync_prescriptions.delay()
+            sync_prescriptions.delay(
+                date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+            )
 
         client.iter_limited_prescriptions.assert_called_once_with(
             date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
@@ -422,7 +509,9 @@ class SyncPrescriptionsTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_prescriptions.delay()
+            sync_prescriptions.delay(
+                date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+            )
 
         prescription = Prescription.objects.get()
         self.assertEqual(
@@ -472,7 +561,11 @@ class SyncPrescriptionsTaskTests(TestCase):
         client.iter_limited_prescriptions.return_value = iter([])
 
         with patch("synch.tasks.CCMDDAPIClient", return_value=client):
-            sync_prescriptions.delay()
+            sync_prescriptions.delay(
+                date_updated=datetime(
+                    2026, 3, 31, 14, 7, 57, 433000, tzinfo=timezone.utc
+                ),
+            )
 
         client.iter_limited_prescriptions.assert_called_once_with(
             date_updated=datetime(2026, 3, 31, 14, 7, 57, 433000, tzinfo=timezone.utc),
@@ -518,7 +611,11 @@ class SyncPrescriptionsTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_prescriptions.delay()
+            sync_prescriptions.delay(
+                date_updated=datetime(
+                    2026, 3, 31, 14, 7, 57, 433000, tzinfo=timezone.utc
+                ),
+            )
 
         prescription = Prescription.objects.get(
             ccmdd_prescription_id="B2798F40-FA2C-F111-AD54-010101010000"
