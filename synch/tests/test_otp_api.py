@@ -47,7 +47,11 @@ class SendOTPAPITests(TestCase):
     def test_requires_authentication(self) -> None:
         response = self.api_client.post(
             reverse("otp-send"),
-            data={"msisdn": "+27831234567", "otp": "493821"},
+            data={
+                "msisdn": "+27831234567",
+                "otp": "493821",
+                "recipient_type": "patient",
+            },
             format="json",
         )
 
@@ -58,7 +62,11 @@ class SendOTPAPITests(TestCase):
 
         response = self.api_client.post(
             reverse("otp-send"),
-            data={"msisdn": "+27831234567", "otp": "493821"},
+            data={
+                "msisdn": "+27831234567",
+                "otp": "493821",
+                "recipient_type": "patient",
+            },
             format="json",
         )
 
@@ -80,6 +88,7 @@ class SendOTPAPITests(TestCase):
             data={
                 "msisdn": "+27831234567",
                 "otp": "493821",
+                "recipient_type": "patient",
                 "metadata": {"source": "qa"},
             },
             format="json",
@@ -101,7 +110,12 @@ class SendOTPAPITests(TestCase):
 
         response = self.api_client.post(
             reverse("otp-send"),
-            data={"msisdn": "0831234567", "otp": "", "metadata": []},
+            data={
+                "msisdn": "0831234567",
+                "otp": "",
+                "recipient_type": "invalid",
+                "metadata": [],
+            },
             format="json",
         )
 
@@ -111,8 +125,51 @@ class SendOTPAPITests(TestCase):
             {
                 "msisdn": ["Enter a valid E.164 phone number."],
                 "otp": ["This field may not be blank."],
+                "recipient_type": ['"invalid" is not a valid choice.'],
                 "metadata": ['Expected a dictionary of items but got type "list".'],
             },
+        )
+
+    def test_requires_recipient_type(self) -> None:
+        self.authenticate()
+        self.grant_permission()
+
+        response = self.api_client.post(
+            reverse("otp-send"),
+            data={"msisdn": "+27831234567", "otp": "493821"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(), {"recipient_type": ["This field is required."]}
+        )
+
+    @patch("synch.api_views.get_turn_otp_client")
+    def test_accepts_synch_user_recipient_type(
+        self,
+        get_turn_otp_client: Mock,
+    ) -> None:
+        self.authenticate()
+        self.grant_permission()
+        turn_client = Mock()
+        turn_client.send_authentication_template_message.return_value = "wamid.123"
+        get_turn_otp_client.return_value = turn_client
+
+        response = self.api_client.post(
+            reverse("otp-send"),
+            data={
+                "msisdn": "+27831234567",
+                "otp": "493821",
+                "recipient_type": "synch_user",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"status": "submitted", "message_id": "wamid.123"},
         )
 
     @override_settings(
@@ -138,14 +195,22 @@ class SendOTPAPITests(TestCase):
         for _ in range(2):
             response = self.api_client.post(
                 reverse("otp-send"),
-                data={"msisdn": "+27831234567", "otp": "493821"},
+                data={
+                    "msisdn": "+27831234567",
+                    "otp": "493821",
+                    "recipient_type": "patient",
+                },
                 format="json",
             )
             self.assertEqual(response.status_code, 200)
 
         response = self.api_client.post(
             reverse("otp-send"),
-            data={"msisdn": "+27831234567", "otp": "493821"},
+            data={
+                "msisdn": "+27831234567",
+                "otp": "493821",
+                "recipient_type": "synch_user",
+            },
             format="json",
         )
 
@@ -167,7 +232,11 @@ class SendOTPAPITests(TestCase):
         for _ in range(2):
             response = self.api_client.post(
                 reverse("otp-send"),
-                data={"msisdn": "0831234567", "otp": "493821"},
+                data={
+                    "msisdn": "0831234567",
+                    "otp": "493821",
+                    "recipient_type": "patient",
+                },
                 format="json",
             )
             self.assertEqual(response.status_code, 400)
@@ -189,7 +258,11 @@ class SendOTPAPITests(TestCase):
 
         response = self.api_client.post(
             reverse("otp-send"),
-            data={"msisdn": "+27831234567", "otp": "493821"},
+            data={
+                "msisdn": "+27831234567",
+                "otp": "493821",
+                "recipient_type": "patient",
+            },
             format="json",
         )
 
@@ -217,7 +290,11 @@ class SendOTPAPITests(TestCase):
 
         response = self.api_client.post(
             reverse("otp-send"),
-            data={"msisdn": "+27831234567", "otp": "493821"},
+            data={
+                "msisdn": "+27831234567",
+                "otp": "493821",
+                "recipient_type": "patient",
+            },
             format="json",
         )
 
@@ -250,6 +327,18 @@ class APIDocumentationTests(TestCase):
         self.assertEqual(
             request_schema["properties"]["metadata"]["description"],
             "Optional metadata reserved for future use. Accepted but ignored.",
+        )
+        self.assertEqual(
+            request_schema["required"],
+            ["msisdn", "otp", "recipient_type"],
+        )
+        self.assertEqual(
+            request_schema["properties"]["recipient_type"]["allOf"],
+            [{"$ref": "#/components/schemas/RecipientTypeEnum"}],
+        )
+        self.assertEqual(
+            schema["components"]["schemas"]["RecipientTypeEnum"]["enum"],
+            ["patient", "synch_user"],
         )
 
     def test_swagger_ui_endpoint_is_public(self) -> None:

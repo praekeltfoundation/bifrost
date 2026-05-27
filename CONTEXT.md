@@ -40,6 +40,10 @@ _Avoid_: patient, person
 A request from SyNCH to send a one-time-passcode WhatsApp template message to a **Turn Contact** identified only by phone number.
 _Avoid_: patient verification, user signup, OTP record
 
+**OTP Recipient Type**:
+The business-role classification attached to an **OTP Delivery Request** that tells SyNCH and Bifrost whether the recipient is the **Patient** or a SyNCH user, without changing delivery behavior in the current version. The public API uses the values `patient` and `synch_user`.
+_Avoid_: template selector, auth workflow, contact type
+
 **API Caller**:
 The authenticated Django user account whose token authorises an inbound **OTP Delivery Request**.
 _Avoid_: patient, recipient, Turn Contact
@@ -96,6 +100,9 @@ _Avoid_: suppression reason field, latest delivery error
 - A **Consent Backfill** may use a CSV export as its source of facility text when production patient state is unavailable locally
 - An **OTP Delivery Request** targets exactly one **Turn Contact**
 - An **OTP Delivery Request** does not require a **Patient**
+- An **OTP Delivery Request** must declare exactly one **OTP Recipient Type**
+- **OTP Recipient Type** may be `patient` even when Bifrost cannot map the request to a stored **Patient**
+- **OTP Recipient Type** is request-scoped and does not permanently classify a **Turn Contact**
 - An **OTP Delivery Request** is authorised by exactly one **API Caller**
 - **Delivery Protection** may reject an **OTP Delivery Request** even when the caller's OTP policy would otherwise allow it
 - **Delivery Protection** for OTP sending is separate from **Reminder Suppressed**
@@ -121,6 +128,7 @@ _Avoid_: suppression reason field, latest delivery error
 - "latest phone number" was used to mean the newest stored phone value, even when unusable — resolved: messaging should use the most recent valid **Messaging Phone Number**
 - "user" was used for pre-sync OTP recipients — resolved: use **Turn Contact** for the recipient and **OTP Delivery Request** for the API call
 - "user" was used for inbound authentication — resolved: use **API Caller** for the authenticated Django principal
+- "patient vs user OTP" could be read as a delivery behavior split — resolved: use **OTP Recipient Type** for the business-role classification and keep current delivery behavior unchanged
 - `429` could be read as OTP resend policy — resolved: use **Delivery Protection** for Bifrost-side channel safeguards and keep OTP lifecycle ownership in SyNCH
 - reminder suppression could be read as a general messaging block — resolved: OTP **Delivery Protection** and **Reminder Suppressed** are separate mechanisms
 - "opt in" was used to mean both clinic-captured consent and a WhatsApp button press — resolved: use **Consent Backfill** for the one-off operation that mirrors existing clinic consent into Turn
