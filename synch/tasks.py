@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -21,6 +22,13 @@ EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class PatientPhoneNumberChange:
+    patient: Patient
+    old_phone_number: str
+    new_phone_number: str
+
+
 def _parse_ccmdd_timestamp(value: str) -> datetime:
     return datetime.strptime(value, CCMDD_TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc)
 
@@ -38,6 +46,10 @@ def _get_turn_client() -> TurnAPIClient:
         base_url=settings.TURN_BASE_URL,
         token=settings.TURN_TOKEN,
     )
+
+
+def _get_turn_error_urns(errors: list[dict[str, str]]) -> set[str]:
+    return {error.get("urn") or "" for error in errors}
 
 
 @shared_task
@@ -68,6 +80,7 @@ def sync_all() -> None:
             sync_patients(lock, prescription_date_updated=prescription_date_updated)
             sync_appointment_dates_to_turn(lock)
             sync_new_patients_to_turn(lock)
+            sync_changed_patient_phone_numbers_to_turn(lock)
     finally:
         lock.release()
 
@@ -222,6 +235,7 @@ def sync_new_patients_to_turn(lock: Lock | None = None) -> None:
     rows: list[dict[str, object]] = []
     updated_patient_ids: list[str] = []
     patient_urn_id_mapping: dict[str, str] = {}
+    patient_active_phone_numbers: dict[str, str] = {}
     today = django_timezone.localdate()
 
     for patient in new_patients:
@@ -252,6 +266,9 @@ def sync_new_patients_to_turn(lock: Lock | None = None) -> None:
             patient.ccmdd_patient_id
         )
         updated_patient_ids.append(patient.ccmdd_patient_id)
+        patient_active_phone_numbers[patient.ccmdd_patient_id] = (
+            sync_details.messaging_phone_number
+        )
         if lock is not None:
             lock.refresh()
 
@@ -272,11 +289,121 @@ def sync_new_patients_to_turn(lock: Lock | None = None) -> None:
             repr(errors),
         )
 
-    Patient.objects.filter(ccmdd_patient_id__in=updated_patient_ids).update(
-        invite_sent=True
+    updated_patients = list(
+        Patient.objects.filter(ccmdd_patient_id__in=updated_patient_ids)
+    )
+    for patient in updated_patients:
+        patient.invite_sent = True
+        patient.active_messaging_phone_number = patient_active_phone_numbers[
+            patient.ccmdd_patient_id
+        ]
+    Patient.objects.bulk_update(
+        updated_patients,
+        ["invite_sent", "active_messaging_phone_number"],
     )
 
     logger.info("Imported %s new patients to Turn.", len(rows))
+
+
+@shared_task
+def sync_changed_patient_phone_numbers_to_turn(lock: Lock | None = None) -> None:
+    timestamp = django_timezone.now().isoformat()
+    changes: list[PatientPhoneNumberChange] = []
+
+    for patient in Patient.objects.filter(
+        invite_sent=True,
+        active_messaging_phone_number__gt="",
+    ).iterator():
+        messaging_phone_number = patient.messaging_phone_number
+        if messaging_phone_number is None:
+            logger.info(
+                "Patient %s does not have a replacement messaging phone number, "
+                "skipping changed phone number sync.",
+                patient.ccmdd_patient_id,
+            )
+            continue
+
+        if patient.active_messaging_phone_number == messaging_phone_number:
+            continue
+
+        changes.append(
+            PatientPhoneNumberChange(
+                patient=patient,
+                old_phone_number=patient.active_messaging_phone_number,
+                new_phone_number=messaging_phone_number,
+            )
+        )
+        if lock is not None:
+            lock.refresh()
+
+    if not changes:
+        logger.info("Imported 0 changed patient phone numbers to Turn.")
+        return
+
+    turn_client = _get_turn_client()
+    retirement_errors = turn_client.import_contacts(
+        [
+            {
+                "urn": change.old_phone_number,
+                "synch_reminders": "False",
+            }
+            for change in changes
+        ]
+    )
+    if retirement_errors:
+        logger.error(
+            "Turn returned retirement import errors for %d changed phone number "
+            "row(s): %s",
+            len(retirement_errors),
+            repr(retirement_errors),
+        )
+
+    failed_retirement_urns = _get_turn_error_urns(retirement_errors)
+    activation_changes = [
+        change
+        for change in changes
+        if change.old_phone_number not in failed_retirement_urns
+    ]
+    if not activation_changes:
+        logger.info("Imported 0 changed patient phone numbers to Turn.")
+        return
+
+    activation_errors = turn_client.import_contacts(
+        [
+            {
+                "urn": change.new_phone_number,
+                "synch_new_user": timestamp,
+            }
+            for change in activation_changes
+        ]
+    )
+    if activation_errors:
+        logger.error(
+            "Turn returned activation import errors for %d changed phone number "
+            "row(s): %s",
+            len(activation_errors),
+            repr(activation_errors),
+        )
+
+    failed_activation_urns = _get_turn_error_urns(activation_errors)
+    updated_patients: list[Patient] = []
+    for change in activation_changes:
+        if change.new_phone_number in failed_activation_urns:
+            continue
+
+        change.patient.active_messaging_phone_number = change.new_phone_number
+        updated_patients.append(change.patient)
+
+    if updated_patients:
+        Patient.objects.bulk_update(
+            updated_patients,
+            ["active_messaging_phone_number"],
+        )
+
+    logger.info(
+        "Imported %s changed patient phone numbers to Turn.",
+        len(updated_patients),
+    )
 
 
 @shared_task
