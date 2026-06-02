@@ -8,6 +8,10 @@ Bifrost synchronises patient and appointment data from SyNCH CCMDD into local st
 A person synced from SyNCH CCMDD whose records may be imported into Turn.
 _Avoid_: contact, user, member
 
+**SyNCH Patient Identifier**:
+The CCMDD patient identifier shared by SyNCH patient and prescription records for the same **Patient**.
+_Avoid_: prescription patient id, local patient id
+
 **Complete Patient Delta**:
 The patient changeset Bifrost expects from SyNCH for each sync window: every **Patient** whose own record changed, plus every **Patient** whose relevant prescription changed, even if the patient row itself did not.
 _Avoid_: full patient snapshot, patient-only delta
@@ -83,11 +87,14 @@ _Avoid_: suppression reason field, latest delivery error
 ## Relationships
 
 - A **Patient** may have many prescriptions
+- A **Patient** has exactly one **SyNCH Patient Identifier**
+- A prescription references exactly one **SyNCH Patient Identifier**
 - A **Complete Patient Delta** may include a **Patient** whose own record did not change
 - A **Complete Patient Delta** must include a **Patient** whose relevant prescription changed
 - A **Relevant Prescription Filter** may change which **Patient** records appear in the upstream patient feed without changing Bifrost's own messaging rules
 - A **Patient** may have at most one current **Messaging Phone Number**
 - A **Patient** may map to different **Turn Contact** records over time as their **Messaging Phone Number** changes
+- Multiple **Patient** records may map to the same **Turn Contact** when they share a **Messaging Phone Number**
 - A **Patient** may be **New-Patient Eligible** even when they have no **Upcoming Appointment**
 - A **Patient** is **New-Patient Eligible** only when they have a **Messaging Phone Number**
 - A **Patient** is **New-Patient Eligible** only when they also have a usable **Facility**
@@ -95,6 +102,8 @@ _Avoid_: suppression reason field, latest delivery error
 - An **Upcoming Appointment** belongs to exactly one prescription
 - An **Upcoming Appointment** must resolve to exactly one usable **Facility**
 - A **Turn Contact** corresponds to exactly one WhatsApp phone number
+- A **Turn Contact** may hold the **SyNCH Patient Identifier** for the **Patient** currently associated with its phone number
+- A **Turn Contact** can hold only one current **SyNCH Patient Identifier**, even when multiple **Patient** records share its **Messaging Phone Number**
 - A **Consent Backfill** targets one or more **Turn Contact** records
 - A **Consent Backfill** may set reminder-consent fields without changing whether a **Patient** is **Invite Sent**
 - A **Consent Backfill** may use a CSV export as its source of facility text when production patient state is unavailable locally
@@ -124,6 +133,8 @@ _Avoid_: suppression reason field, latest delivery error
 ## Flagged ambiguities
 
 - "new patient" was used to mean both a newly synced **Patient** and a **New-Patient Eligible** patient — resolved: messaging should use **New-Patient Eligible**
+- `ccmdd_patient_id` and prescription `patient_id` could be read as competing identifiers — resolved: both represent the same **SyNCH Patient Identifier**
+- adding patient identity to Turn could be read as resolving shared-phone ambiguity — resolved: shared **Messaging Phone Number** conflicts remain out of scope for this change
 - "relevant prescription" could be read as Bifrost's own eligibility logic — resolved: use **Relevant Prescription Filter** for the upstream feed rule and keep local messaging decisions in Bifrost
 - "latest phone number" was used to mean the newest stored phone value, even when unusable — resolved: messaging should use the most recent valid **Messaging Phone Number**
 - "user" was used for pre-sync OTP recipients — resolved: use **Turn Contact** for the recipient and **OTP Delivery Request** for the API call

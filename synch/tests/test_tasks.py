@@ -1436,6 +1436,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             [
                 {
                     "urn": "+27820000002",
+                    "synch_patient_id": "patient-with-appointment",
                     "synch_next_appointment_date": "2026-04-21",
                     "synch_appointment_facility_name": "Clinic A",
                     "synch_appointment_facility_latitude": "-26.2041",
@@ -1486,6 +1487,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             [
                 {
                     "urn": "+27820000002",
+                    "synch_patient_id": "patient-no-upcoming-appointment",
                     "synch_next_appointment_date": "",
                     "synch_appointment_facility_name": "",
                     "synch_appointment_facility_latitude": "",
@@ -1551,6 +1553,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             [
                 {
                     "urn": "+27820000002",
+                    "synch_patient_id": "patient-fallback-facility",
                     "synch_next_appointment_date": "",
                     "synch_appointment_facility_name": "Clinic A",
                     "synch_appointment_facility_latitude": "-26.2041",
@@ -1616,6 +1619,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             [
                 {
                     "urn": "+27820000002",
+                    "synch_patient_id": "patient-missing-upcoming-facility",
                     "synch_next_appointment_date": "",
                     "synch_appointment_facility_name": "Clinic A",
                     "synch_appointment_facility_latitude": "-26.2041",
@@ -1703,6 +1707,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             [
                 {
                     "urn": "+27820000002",
+                    "synch_patient_id": "patient-missing-facility",
                     "synch_next_appointment_date": "",
                     "synch_appointment_facility_name": "",
                     "synch_appointment_facility_latitude": "",
@@ -1768,6 +1773,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             [
                 {
                     "urn": "+27820000002",
+                    "synch_patient_id": "patient-shared-rules",
                     "synch_next_appointment_date": "2026-04-22",
                     "synch_appointment_facility_name": "Clinic A",
                     "synch_appointment_facility_latitude": "-26.2041",
