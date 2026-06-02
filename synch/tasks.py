@@ -296,6 +296,7 @@ def sync_appointment_dates_to_turn(lock: Lock | None = None) -> None:
 
         row: dict[str, object] = {
             "urn": sync_details.messaging_phone_number,
+            "synch_patient_id": patient.ccmdd_patient_id,
             "synch_next_appointment_date": "",
             "synch_appointment_facility_name": "",
             "synch_appointment_facility_latitude": "",

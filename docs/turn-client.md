@@ -38,7 +38,7 @@ errors = client.import_contacts(
 
 The method returns a list of parsed error rows from Turn's streamed CSV response. Successful rows are ignored.
 
-The CCMDD sync tasks use this import path to update Turn contacts with a shared patient messaging phone number, appointment contact fields, and the `synch_new_user` contact field for invite-eligible patients.
+The CCMDD sync tasks use this import path to update Turn contacts with a shared patient messaging phone number, the `synch_patient_id` link field, appointment contact fields, and the `synch_new_user` contact field for invite-eligible patients.
 
 Update a single contact profile:
 

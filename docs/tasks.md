@@ -85,6 +85,7 @@ into the local database.
 - For each patient, it resolves the same shared patient messaging state used by `sync_new_patients_to_turn`.
 - It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
 - It skips patients that have no usable messaging phone number.
+- It sends `synch_patient_id` as the raw CCMDD patient identifier for every emitted row.
 - It flattens `return_dates` across all of the patient's prescriptions, keeps only appointment dates on or after `django.utils.timezone.localdate()`, discards appointments whose facility is missing or unnamed, and selects the earliest remaining appointment.
 - If multiple usable appointments share the same earliest date, it selects the appointment from the most recently created prescription.
 - It sends `synch_next_appointment_date` only when a usable upcoming appointment exists.
