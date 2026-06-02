@@ -14,6 +14,7 @@ from synch.tasks import (
     healthcheck,
     sync_all,
     sync_appointment_dates_to_turn,
+    sync_changed_patient_phone_numbers_to_turn,
     sync_facilities,
     sync_new_patients_to_turn,
     sync_patients,
@@ -68,6 +69,9 @@ class CeleryTaskExecutionTests(TestCase):
                 "synch.tasks.sync_appointment_dates_to_turn"
             ) as sync_appointment_dates_to_turn_mock,
             patch("synch.tasks.sync_new_patients_to_turn") as sync_new_patients_to_turn,
+            patch(
+                "synch.tasks.sync_changed_patient_phone_numbers_to_turn"
+            ) as sync_changed_patient_phone_numbers_to_turn_mock,
         ):
             result = sync_all.delay()
 
@@ -77,6 +81,7 @@ class CeleryTaskExecutionTests(TestCase):
         sync_prescriptions_mock.assert_called_once()
         sync_appointment_dates_to_turn_mock.assert_called_once()
         sync_new_patients_to_turn.assert_called_once()
+        sync_changed_patient_phone_numbers_to_turn_mock.assert_called_once()
         self.assertIs(
             sync_facilities_mock.call_args.args[0],
             sync_prescriptions_mock.call_args.args[0],
@@ -88,6 +93,10 @@ class CeleryTaskExecutionTests(TestCase):
         self.assertIs(
             sync_facilities_mock.call_args.args[0],
             sync_appointment_dates_to_turn_mock.call_args.args[0],
+        )
+        self.assertIs(
+            sync_facilities_mock.call_args.args[0],
+            sync_changed_patient_phone_numbers_to_turn_mock.call_args.args[0],
         )
         self.assertEqual(
             sync_prescriptions_mock.call_args.kwargs["date_updated"],
@@ -897,6 +906,10 @@ class SyncNewPatientsToTurnTests(TestCase):
         )
         new_patient.refresh_from_db()
         self.assertTrue(new_patient.invite_sent)
+        self.assertEqual(
+            new_patient.active_messaging_phone_number,
+            "+27820000001",
+        )
 
     def test_sync_new_patients_to_turn_normalizes_phone_to_e164_for_south_africa(
         self,
@@ -1363,6 +1376,223 @@ class SyncNewPatientsToTurnTests(TestCase):
                 "'synch_new_user': 'ERROR: invalid date'}]"
             ],
         )
+
+
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+    TURN_BASE_URL="https://whatsapp.turn.io",
+    TURN_TOKEN=TEST_PASSWORD,
+)
+class SyncChangedPatientPhoneNumbersToTurnTests(TestCase):
+    def test_skips_invited_patients_without_active_contact(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="existing-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 5, 0, tzinfo=timezone.utc),
+            invite_sent=True,
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+
+        with patch("synch.tasks.TurnAPIClient", return_value=turn_client):
+            sync_changed_patient_phone_numbers_to_turn()
+
+        turn_client.import_contacts.assert_not_called()
+        patient.refresh_from_db()
+        self.assertEqual(patient.active_messaging_phone_number, "")
+
+    def test_retires_old_contact_then_triggers_new_contact(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="changed-phone-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 5, 0, tzinfo=timezone.utc),
+            invite_sent=True,
+            active_messaging_phone_number="+27820000001",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="old-rx",
+            date_created=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="new-rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.now",
+                return_value=datetime(2026, 4, 21, 10, 11, 12, tzinfo=timezone.utc),
+            ),
+        ):
+            sync_changed_patient_phone_numbers_to_turn()
+
+        self.assertEqual(
+            turn_client.import_contacts.call_args_list,
+            [
+                call(
+                    [
+                        {
+                            "urn": "+27820000001",
+                            "synch_reminders": "False",
+                        }
+                    ]
+                ),
+                call(
+                    [
+                        {
+                            "urn": "+27820000002",
+                            "synch_new_user": "2026-04-21T10:11:12+00:00",
+                        }
+                    ]
+                ),
+            ],
+        )
+        patient.refresh_from_db()
+        self.assertEqual(patient.active_messaging_phone_number, "+27820000002")
+
+    def test_does_not_trigger_new_contact_when_retirement_fails(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="changed-phone-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 5, 0, tzinfo=timezone.utc),
+            invite_sent=True,
+            active_messaging_phone_number="+27820000001",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="new-rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = [
+            {
+                "urn": "+27820000001",
+                "synch_reminders": "ERROR: failed",
+            }
+        ]
+
+        with patch("synch.tasks.TurnAPIClient", return_value=turn_client):
+            sync_changed_patient_phone_numbers_to_turn()
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27820000001",
+                    "synch_reminders": "False",
+                }
+            ]
+        )
+        patient.refresh_from_db()
+        self.assertEqual(patient.active_messaging_phone_number, "+27820000001")
+
+    def test_keeps_active_contact_when_activation_fails(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="changed-phone-patient",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 5, 0, tzinfo=timezone.utc),
+            invite_sent=True,
+            active_messaging_phone_number="+27820000001",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="new-rx",
+            date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000002",
+            department_id=1,
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.side_effect = [
+            [],
+            [
+                {
+                    "urn": "+27820000002",
+                    "synch_new_user": "ERROR: failed",
+                }
+            ],
+        ]
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.now",
+                return_value=datetime(2026, 4, 21, 10, 11, 12, tzinfo=timezone.utc),
+            ),
+        ):
+            sync_changed_patient_phone_numbers_to_turn()
+
+        self.assertEqual(
+            turn_client.import_contacts.call_args_list,
+            [
+                call(
+                    [
+                        {
+                            "urn": "+27820000001",
+                            "synch_reminders": "False",
+                        }
+                    ]
+                ),
+                call(
+                    [
+                        {
+                            "urn": "+27820000002",
+                            "synch_new_user": "2026-04-21T10:11:12+00:00",
+                        }
+                    ]
+                ),
+            ],
+        )
+        patient.refresh_from_db()
+        self.assertEqual(patient.active_messaging_phone_number, "+27820000001")
 
 
 @override_settings(

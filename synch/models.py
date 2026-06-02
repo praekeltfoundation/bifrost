@@ -53,6 +53,10 @@ class Patient(models.Model):
     date_created: models.DateTimeField[datetime, datetime] = models.DateTimeField()
     date_updated: models.DateTimeField[datetime, datetime] = models.DateTimeField()
     invite_sent: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    active_messaging_phone_number: models.CharField[str, str] = models.CharField(
+        max_length=255,
+        blank=True,
+    )
     payload: models.JSONField[dict[str, Any], dict[str, Any]] = models.JSONField(
         default=dict
     )

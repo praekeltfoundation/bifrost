@@ -23,6 +23,7 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It runs `sync_patients` third with the same captured prescription watermark.
 - It runs `sync_appointment_dates_to_turn` fourth.
 - It runs `sync_new_patients_to_turn` fifth.
+- It runs `sync_changed_patient_phone_numbers_to_turn` sixth.
 - It only proceeds to the next step if the previous step completed successfully.
 - It wraps the sync steps in a database transaction, so a failure in any step rolls back the local database updates made during that run.
 - If it cannot get the top-level lock, it logs a warning and does not attempt any sync or Turn import.
@@ -74,8 +75,23 @@ into the local database.
 - If no usable upcoming appointment exists after filtering by date and facility validity, it falls back to the most recently created prescription whose facility resolves to a non-blank name.
 - It sets `synch_new_user` to a single `timezone.now().isoformat()` value generated once for the batch.
 - It sends the rows through the Turn CSV contacts import API.
-- It raises an error if Turn reports row-level import errors in the API response.
-- It updates `invite_sent` to `True` for all successfully imported patients.
+- It logs Turn row-level import errors and does not mark those patients as imported.
+- It updates `invite_sent` to `True` and stores the active messaging phone number for all successfully imported patients.
+
+## `sync_changed_patient_phone_numbers_to_turn`
+
+`synch.tasks.sync_changed_patient_phone_numbers_to_turn` handles patients whose current messaging phone number differs from the Turn contact Bifrost last activated for them.
+
+- It runs after `sync_appointment_dates_to_turn`, so the new Turn contact already has current patient and appointment context before `synch_new_user` is set.
+- It runs after `sync_new_patients_to_turn`, so first-time imports establish their active messaging phone number before phone-change handling.
+- Patients invited before active-contact tracking existed are backfilled by the migration that adds the stored active messaging phone number.
+- It skips patients with no replacement messaging phone number.
+- It compares stored and current phone numbers using normalized E.164 values.
+- For each changed phone number, it first imports a retirement row for the old Turn contact with `synch_reminders` set to `False`.
+- It imports a `synch_new_user` trigger row for the new Turn contact only when the old-contact retirement row succeeded.
+- It uses one `timezone.now().isoformat()` trigger timestamp for the task run.
+- It stores the new active messaging phone number only for patients whose old-contact retirement and new-contact trigger rows both succeeded.
+- Failed rows remain retryable in later sync runs because their stored active messaging phone number is not advanced.
 
 ## `sync_appointment_dates_to_turn`
 
