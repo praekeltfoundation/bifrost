@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "lock.apps.LockConfig",
     "rest_framework",
     "rest_framework.authtoken",
+    "edrweb.apps.EDRWebConfig",
     "synch.apps.SynchConfig",
 ]
 
@@ -161,6 +162,9 @@ CELERY_BEAT_SCHEDULE = {
 CCMDD_BASE_URL = env("CCMDD_BASE_URL", default="")
 CCMDD_USERNAME = env("CCMDD_USERNAME", default="")
 CCMDD_PASSWORD = env("CCMDD_PASSWORD", default="")
+EDRWEB_BASE_URL = env("EDRWEB_BASE_URL", default="")
+EDRWEB_USERNAME = env("EDRWEB_USERNAME", default="")
+EDRWEB_PASSWORD = env("EDRWEB_PASSWORD", default="")
 TURN_BASE_URL = env("TURN_BASE_URL", default="")
 TURN_TOKEN = env("TURN_TOKEN", default="")
 TURN_OTP_TOKEN = env("TURN_OTP_TOKEN", default="")
