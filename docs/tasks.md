@@ -1,6 +1,7 @@
 # Tasks
 
-The `synch.tasks` module defines the Celery tasks used by the synchronization app.
+The `synch.tasks` and `edrweb.tasks` modules define the Celery tasks used by
+the synchronization apps.
 
 ## `healthcheck`
 
@@ -27,6 +28,36 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It only proceeds to the next step if the previous step completed successfully.
 - It wraps the sync steps in a database transaction, so a failure in any step rolls back the local database updates made during that run.
 - If it cannot get the top-level lock, it logs a warning and does not attempt any sync or Turn import.
+
+## `sync_appointment_reminder_delta`
+
+`edrweb.tasks.sync_appointment_reminder_delta` is the scheduled delta task for
+the EDRWeb Appointment Reminder Feed.
+
+- Celery Beat schedules it to run every 4 hours.
+- It skips without acquiring the lock when `EDRWEB_BASE_URL`, `EDRWEB_USERNAME`,
+  or `EDRWEB_PASSWORD` is not configured.
+- It acquires the `sync-edrweb-appointment-reminder-delta` lock before starting,
+  so only one EDRWeb appointment reminder delta pull can proceed at a time.
+- It derives the delta checkpoint from the latest stored `EDRWebPatient.updated_at`
+  value.
+- If no EDRWeb patient snapshots exist locally, it omits `updatedSince`.
+- If a checkpoint exists, it queries from one second before that checkpoint to
+  avoid missing same-timestamp upstream updates.
+- It stores one current local `EDRWebPatient` snapshot per EDRWeb `PersonId`.
+- For each returned record, it stores `PersonId`, `PhoneNumber`, `UpdatedAt`, and
+  `Appointments` in explicit model fields.
+- It stores every remaining EDRWeb patient field in the `EDRWebPatient.payload`
+  JSON column.
+- Missing `PhoneNumber` is stored as a blank string.
+- Missing `Appointments` is stored as an empty list.
+- It rejects records without `PersonId` or timezone-aware `UpdatedAt`, and records
+  whose `Appointments` value is not a list.
+- It ignores incoming records that are older than the currently stored snapshot
+  for the same `PersonId`.
+- It wraps the pull and upserts in a database transaction, so a failure rolls back
+  all local database updates made during that run.
+- If it cannot get the lock, it logs a warning and does not attempt any API pull.
 
 ## `sync_patients`
 
