@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import cast
 from unittest.mock import Mock, call
 
 import requests
 from django.test import SimpleTestCase
+from requests.auth import HTTPDigestAuth
 
 from synch.ccmdd import (
     LONG_RUNNING_POLL_INTERVAL_SECONDS,
@@ -65,8 +67,10 @@ class CCMDDAPIClientTests(SimpleTestCase):
         client = self.make_client()
 
         self.assertEqual(client.base_url, "https://test.ccmdd.org.za")
-        self.assertEqual(client.session.auth.username, "api-user")
-        self.assertEqual(client.session.auth.password, TEST_PASSWORD)
+        self.assertIsInstance(client.session.auth, HTTPDigestAuth)
+        auth = cast(HTTPDigestAuth, client.session.auth)
+        self.assertEqual(auth.username, "api-user")
+        self.assertEqual(auth.password, TEST_PASSWORD)
 
     def test_iter_limited_prescriptions_posts_without_date_updated_when_unset(self):
         session = Mock()

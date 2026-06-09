@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from io import StringIO
 from random import uniform
 from time import sleep
@@ -44,8 +44,8 @@ class TurnOTPTimeoutError(TurnOTPAPIError):
 class TurnAPIClient:
     def __init__(self, base_url: str, token: str) -> None:
         self.base_url = base_url.rstrip("/")
-        self.sleep = sleep
-        self.random_uniform = uniform
+        self.sleep: Callable[[float], None] = sleep
+        self.random_uniform: Callable[[float, float], float] = uniform
         self.session = Session()
         self.session.headers.update(
             {

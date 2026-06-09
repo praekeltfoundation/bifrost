@@ -106,11 +106,6 @@ class SendOTPRequestSerializer(serializers.Serializer):
             raise serializers.ValidationError("Enter a valid E.164 phone number.")
         return normalized_phone_number
 
-    def validate_metadata(self, value: object) -> dict[str, object]:
-        if not isinstance(value, dict):
-            raise serializers.ValidationError("Expected an object of key-value pairs.")
-        return value
-
 
 class SendOTPResponseSerializer(serializers.Serializer):
     status = serializers.CharField()
@@ -169,7 +164,9 @@ class ValidationErrorResponseSerializer(serializers.Serializer):
                             "msisdn": ["Enter a valid E.164 phone number."],
                             "otp": ["This field may not be blank."],
                             "recipient_type": ['"invalid" is not a valid choice.'],
-                            "metadata": ["Expected an object of key-value pairs."],
+                            "metadata": [
+                                'Expected a dictionary of items but got type "list".'
+                            ],
                         },
                         response_only=True,
                     )

@@ -19,10 +19,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "celery-types>=0.26.0",
-    "django-stubs[compatible-mypy]>=6.0.2",
-    "djangorestframework-stubs[compatible-mypy]>=3.16.9",
-    "mypy>=1.20.1",
+    "django-stubs>=6.0.5",
+    "djangorestframework-stubs>=3.17.0",
     "ruff>=0.15.10",
+    "ty>=0.0.46",
     "types-requests>=2.33.0.20260408",
 ]
 
@@ -49,12 +49,5 @@ extend-select = [
     "PTH", # flake8-use-pathlib
 ]
 
-[tool.mypy]
-plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
-
-[tool.django-stubs]
-django_settings_module = "bifrost.settings"
-
-[[tool.mypy.overrides]]
-module = ["environ.*"]
-ignore_missing_imports = true
+[tool.ty.environment]
+python-version = "3.10"

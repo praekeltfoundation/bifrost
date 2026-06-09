@@ -3,6 +3,7 @@
 from typing import ClassVar
 
 from django.db import migrations
+from django.db.migrations.operations.base import Operation
 
 
 def existing_users_invite_sent(apps, scheme_editor):
@@ -19,6 +20,6 @@ class Migration(migrations.Migration):
         ("synch", "0004_alter_facility_options_patient_invite_sent"),
     ]
 
-    operations: ClassVar[list[migrations.operations.base.Operation]] = [
+    operations: ClassVar[list[Operation]] = [
         migrations.RunPython(existing_users_invite_sent, noop),
     ]

@@ -4,6 +4,7 @@ from typing import ClassVar
 
 import phonenumbers
 from django.db import migrations, models
+from django.db.migrations.operations.base import Operation
 
 
 def _normalize_phone_number(value: str) -> str | None:
@@ -55,7 +56,7 @@ class Migration(migrations.Migration):
         ("synch", "0007_create_otp_delivery_throttle_cache"),
     ]
 
-    operations: ClassVar[list[migrations.operations.base.Operation]] = [
+    operations: ClassVar[list[Operation]] = [
         migrations.AddField(
             model_name="patient",
             name="active_messaging_phone_number",

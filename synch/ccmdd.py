@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from enum import IntEnum
 from random import uniform
@@ -45,8 +45,8 @@ class CCMDDAPIClient:
         password: str,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.sleep = sleep
-        self.random_uniform = uniform
+        self.sleep: Callable[[float], None] = sleep
+        self.random_uniform: Callable[[float, float], float] = uniform
         self.session = Session()
         self.session.auth = HTTPDigestAuth(username, password)
 
