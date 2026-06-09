@@ -26,9 +26,9 @@ class SendOTPAPITests(TestCase):
     def setUp(self) -> None:
         self.api_client = cast(Any, APIClient())
         user_model = cast(Any, get_user_model())
+        # These tests use token auth only; avoid paying default password hasher cost.
         self.user = user_model.objects.create_user(
             username="api-caller",
-            password="secret",  # noqa: S106
         )
         self.token = Token.objects.create(user=self.user)
         self.permission = Permission.objects.get(
