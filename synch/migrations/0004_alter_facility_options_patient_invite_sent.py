@@ -2,6 +2,7 @@
 from typing import ClassVar
 
 from django.db import migrations, models
+from django.db.migrations.operations.base import Operation
 
 
 class Migration(migrations.Migration):
@@ -9,7 +10,7 @@ class Migration(migrations.Migration):
         ("synch", "0003_facility"),
     ]
 
-    operations: ClassVar[list[migrations.operations.base.Operation]] = [
+    operations: ClassVar[list[Operation]] = [
         migrations.AlterModelOptions(
             name="facility",
             options={"verbose_name_plural": "facilities"},

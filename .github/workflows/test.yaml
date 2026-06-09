@@ -18,7 +18,7 @@ jobs:
       - name: Check linting
         run: uv run ruff check .
       - name: Check types
-        run: uv run mypy .
+        run: uv run ty check
       - name: Run tests
         run: uv run ./manage.py test
 

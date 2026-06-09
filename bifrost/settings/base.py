@@ -32,7 +32,7 @@ SECRET_KEY = env(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG: bool = True
 
 SENTRY_DSN = env("SENTRY_DSN", default="")
 if SENTRY_DSN:

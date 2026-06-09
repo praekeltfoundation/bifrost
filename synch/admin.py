@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import cast
 
 from django.contrib import admin
 from django.core.exceptions import ValidationError
@@ -23,6 +24,7 @@ def validate_return_dates(return_dates: object) -> list[dict[str, object]]:
         if not isinstance(item, dict):
             raise ValidationError(f"Return date entry {index} must be an object.")
 
+        item = cast(dict[str, object], item)
         unknown_keys = set(item) - ALLOWED_RETURN_DATE_KEYS
         if unknown_keys:
             raise ValidationError(
@@ -43,7 +45,7 @@ def validate_return_dates(return_dates: object) -> list[dict[str, object]]:
                 f"Return date entry {index} must use YYYY-MM-DD format."
             ) from error
 
-    return return_dates
+    return cast(list[dict[str, object]], return_dates)
 
 
 @admin.register(Patient)
@@ -67,7 +69,7 @@ class PrescriptionAdmin(admin.ModelAdmin):
     def get_form(self, request, obj=None, change=False, **kwargs):
         form_class = super().get_form(request, obj, change=change, **kwargs)
 
-        class PrescriptionAdminForm(form_class):
+        class PrescriptionAdminForm(form_class):  # ty: ignore[unsupported-base]
             def clean_return_dates(self) -> list[dict[str, object]]:
                 return validate_return_dates(self.cleaned_data["return_dates"])
 

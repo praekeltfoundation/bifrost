@@ -135,7 +135,7 @@ After every code change, run the full local verification suite:
 ```bash
 uv run ruff format .
 uv run ruff check --fix .
-uv run mypy .
+uv run ty check
 uv run ./manage.py test
 ```
 
