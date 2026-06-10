@@ -1,9 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from typing import Any, cast
 
+import phonenumbers
 from django.db import models
+
+
+def _normalize_phone_number(value: str) -> str | None:
+    try:
+        phone_number = phonenumbers.parse(value, "ZA")
+    except phonenumbers.NumberParseException:
+        return None
+
+    return phonenumbers.format_number(
+        phone_number,
+        phonenumbers.PhoneNumberFormat.E164,
+    )
 
 
 class EDRWebPatient(models.Model):
@@ -73,3 +86,63 @@ class EDRWebPatient(models.Model):
 
     def __str__(self) -> str:
         return self.patient_id
+
+    def get_turn_sync_row(self) -> dict[str, object] | None:
+        phone_number = _normalize_phone_number(self.phone_number)
+        if phone_number is None:
+            return None
+
+        if not self.is_active:
+            return {
+                "urn": phone_number,
+                "edrweb_reminders": "False",
+            }
+
+        row: dict[str, object] = {
+            "urn": phone_number,
+            "edrweb_patient_id": self.patient_id,
+            "edrweb_next_appointment_date": "",
+            "edrweb_appointment_facility_name": "",
+            "edrweb_appointment_facility_latitude": "",
+            "edrweb_appointment_facility_longitude": "",
+        }
+        appointment = self._get_earliest_appointment()
+        if appointment is None:
+            return row
+
+        row["edrweb_next_appointment_date"] = appointment["AppointmentDate"]
+        facility = appointment.get("Facility")
+        if not isinstance(facility, dict):
+            return row
+        facility = cast(dict[str, object], facility)
+
+        facility_name = facility.get("FacilityName")
+        if isinstance(facility_name, str):
+            row["edrweb_appointment_facility_name"] = facility_name
+        latitude = facility.get("Latitude")
+        if isinstance(latitude, int | float) and not isinstance(latitude, bool):
+            row["edrweb_appointment_facility_latitude"] = latitude
+        longitude = facility.get("Longitude")
+        if isinstance(longitude, int | float) and not isinstance(longitude, bool):
+            row["edrweb_appointment_facility_longitude"] = longitude
+
+        return row
+
+    def _get_earliest_appointment(self) -> dict[str, object] | None:
+        appointments: list[tuple[date, dict[str, object]]] = []
+        for item in self.appointments:
+            if not isinstance(item, dict):
+                continue
+            appointment_date_value = item.get("AppointmentDate")
+            if not isinstance(appointment_date_value, str):
+                continue
+            try:
+                appointment_date = date.fromisoformat(appointment_date_value)
+            except ValueError:
+                continue
+            appointments.append((appointment_date, item))
+
+        if not appointments:
+            return None
+
+        return min(appointments, key=lambda item: item[0])[1]

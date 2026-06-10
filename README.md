@@ -37,6 +37,12 @@ Sync uses these CCMDD settings:
 - `CCMDD_USERNAME`
 - `CCMDD_PASSWORD`
 
+EDRWeb appointment reminder sync uses these settings:
+
+- `EDRWEB_BASE_URL`
+- `EDRWEB_USERNAME`
+- `EDRWEB_PASSWORD`
+
 The post-sync Turn import uses these settings:
 
 - `TURN_BASE_URL`
@@ -79,6 +85,8 @@ uv run celery -A bifrost beat --loglevel=info
 ```
 
 Celery Beat schedules CCMDD synchronization every 5 minutes. The scheduled task syncs facilities, prescriptions, and patients, refreshes next-appointment contact fields in Turn for all patients, imports qualifying new patients into Turn, and then handles changed patient phone numbers under a single top-level lock, so only one full CCMDD sync run can proceed at a time even if multiple workers are active. Turn sync uses the most recent valid patient phone number across prescriptions, writes `synch_patient_id` from the raw CCMDD patient identifier, treats appointments as usable only when they are on or after today and resolve to a facility with a non-blank name, and falls back to the most recent prescription with a usable facility name whenever no usable upcoming appointment remains after that filtering. In that fallback case it keeps `synch_next_appointment_date` blank but still populates the facility contact fields. Changed phone numbers retire the previous Turn contact by disabling `synch_reminders`, then set `synch_new_user` on the new Turn contact after the appointment fields have been refreshed.
+
+Celery Beat schedules the EDRWeb appointment reminder delta pull every 4 hours and full reconciliation weekly. After each completed EDRWeb pull commits local snapshots, Bifrost refreshes EDRWeb Turn contact fields from all stored `EDRWebPatient` rows. Active EDRWeb patients get `edrweb_patient_id` and appointment context fields. Inactive EDRWeb patients get `edrweb_reminders` set to `False` without clearing historical EDRWeb context fields.
 
 Useful local URLs:
 

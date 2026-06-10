@@ -40,6 +40,10 @@ The method returns a list of parsed error rows from Turn's streamed CSV response
 
 The CCMDD sync tasks use this import path to update Turn contacts with a shared patient messaging phone number, the `synch_patient_id` link field, appointment contact fields, and the `synch_new_user` contact field for invite-eligible patients.
 
+The EDRWeb sync tasks use this import path after each completed EDRWeb pull to
+refresh `edrweb_patient_id` and EDRWeb appointment contact fields, or to set
+`edrweb_reminders` to `"False"` for inactive EDRWeb patients.
+
 Update a single contact profile:
 
 ```python
