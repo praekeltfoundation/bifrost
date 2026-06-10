@@ -13,6 +13,7 @@ from django.utils import timezone as django_timezone
 from edrweb.api import EDRWebAPIClient
 from edrweb.models import EDRWebPatient
 from lock.models import Lock, LockAcquisitionError
+from synch.turn import TurnAPIClient, TurnAPIError
 
 EDRWEB_APPOINTMENT_REMINDER_SYNC_LOCK_KEY = "sync-edrweb-appointment-reminders"
 EDRWEB_APPOINTMENT_REMINDER_DELTA_LOCK_KEY = EDRWEB_APPOINTMENT_REMINDER_SYNC_LOCK_KEY
@@ -25,6 +26,13 @@ def _get_client() -> EDRWebAPIClient:
         base_url=settings.EDRWEB_BASE_URL,
         username=settings.EDRWEB_USERNAME,
         password=settings.EDRWEB_PASSWORD,
+    )
+
+
+def _get_turn_client() -> TurnAPIClient:
+    return TurnAPIClient(
+        base_url=settings.TURN_BASE_URL,
+        token=settings.TURN_TOKEN,
     )
 
 
@@ -72,13 +80,13 @@ def sync_appointment_reminder_delta() -> None:
                 if _upsert_appointment_reminder_record(record):
                     synced += 1
                 lock.refresh()
+        logger.info(
+            "Synced EDRWeb appointment reminder records: %s.",
+            synced,
+        )
+        sync_appointment_reminders_to_turn(lock)
     finally:
         lock.release()
-
-    logger.info(
-        "Synced EDRWeb appointment reminder records: %s.",
-        synced,
-    )
 
 
 @shared_task(bind=True)
@@ -121,14 +129,14 @@ def sync_appointment_reminder_full_reconciliation(self: Any) -> None:
                 is_active=False,
                 feed_removed_at=django_timezone.now(),
             )
+        logger.info(
+            "Completed EDRWeb appointment reminder full reconciliation. "
+            "Records synced: %s.",
+            len(synced_patient_ids),
+        )
+        sync_appointment_reminders_to_turn(lock)
     finally:
         lock.release()
-
-    logger.info(
-        "Completed EDRWeb appointment reminder full reconciliation. "
-        "Records synced: %s.",
-        len(synced_patient_ids),
-    )
 
 
 def _upsert_appointment_reminder_record(record: dict[str, Any]) -> bool:
@@ -173,3 +181,37 @@ def _upsert_appointment_reminder_record(record: dict[str, Any]) -> bool:
         },
     )
     return True
+
+
+def sync_appointment_reminders_to_turn(lock: Lock | None = None) -> None:
+    rows: list[dict[str, object]] = []
+
+    for patient in EDRWebPatient.objects.order_by("pk").iterator():
+        row = patient.get_turn_sync_row()
+        if row is None:
+            logger.info(
+                "EDRWeb Patient %s does not have a usable WhatsApp phone number, "
+                "skipping Turn sync.",
+                patient.patient_id,
+            )
+            continue
+
+        rows.append(row)
+        if lock is not None:
+            lock.refresh()
+
+    if not rows:
+        logger.info("Imported 0 EDRWeb appointment reminder updates to Turn.")
+        return
+
+    errors = _get_turn_client().import_contacts(rows)
+    if errors:
+        raise TurnAPIError(
+            "Turn returned import errors for "
+            f"{len(errors)} EDRWeb appointment reminder row(s): {errors!r}"
+        )
+
+    logger.info(
+        "Imported %s EDRWeb appointment reminder updates to Turn.",
+        len(rows),
+    )

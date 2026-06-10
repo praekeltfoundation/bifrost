@@ -4,6 +4,15 @@ from unittest.mock import patch
 from django.test import SimpleTestCase
 
 import bifrost.settings.base as base_settings
+from bifrost.phone_numbers import normalize_phone_number
+
+
+class PhoneNumberTests(SimpleTestCase):
+    def test_normalizes_local_south_african_phone_number_to_e164(self):
+        self.assertEqual(normalize_phone_number("0820000001"), "+27820000001")
+
+    def test_returns_none_for_unparseable_phone_number(self):
+        self.assertIsNone(normalize_phone_number("not-a-phone-number"))
 
 
 class SentryConfigurationTests(SimpleTestCase):

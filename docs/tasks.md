@@ -60,6 +60,10 @@ the EDRWeb Appointment Reminder Feed.
   for the same `PersonId`.
 - It wraps the pull and upserts in a database transaction, so a failure rolls back
   all local database updates made during that run.
+- After the local transaction commits, it calls `sync_appointment_reminders_to_turn`
+  while still holding the EDRWeb appointment reminder lock.
+- If the Turn import fails, the completed local EDRWeb snapshot changes remain
+  committed and a later run can retry Turn from the local snapshots.
 - If it cannot get the lock, it logs a warning and does not attempt any API pull.
 
 ## `sync_appointment_reminder_full_reconciliation`
@@ -81,10 +85,38 @@ full reconciliation task for the EDRWeb Appointment Reminder Feed.
 - After the full feed has completed successfully, it marks active local
   `EDRWebPatient` snapshots that were absent from the full feed as inactive and
   stores `feed_removed_at` using Bifrost processing time.
-- It does not update Turn contacts. A later Turn sync should use inactive
-  `EDRWebPatient` snapshots to stop EDRWeb appointment reminder messaging.
 - It wraps the pull, upserts, and inactive marking in a database transaction, so
   a failure rolls back all local database updates made during that run.
+- After the local transaction commits, it calls `sync_appointment_reminders_to_turn`
+  while still holding the EDRWeb appointment reminder lock.
+- If the Turn import fails, the completed local EDRWeb snapshot changes remain
+  committed and a later run can retry Turn from the local snapshots.
+
+## `sync_appointment_reminders_to_turn`
+
+`edrweb.tasks.sync_appointment_reminders_to_turn` refreshes EDRWeb appointment
+reminder contact fields in Turn from locally stored `EDRWebPatient` snapshots.
+
+- It is called after each completed EDRWeb delta pull and full reconciliation
+  pull.
+- It iterates all locally stored `EDRWebPatient` rows, not only rows touched by
+  the latest pull, so earlier Turn failures and admin corrections are retried.
+- It normalizes `EDRWebPatient.phone_number` to E.164 with `phonenumbers`,
+  assuming South Africa (`ZA`) when no country code is provided.
+- It skips EDRWeb patients whose phone number cannot be normalized.
+- For active EDRWeb patients, it sends `edrweb_patient_id`, blank appointment
+  context fields, and then fills appointment context from the earliest valid
+  `AppointmentDate` when one exists.
+- EDRWeb appointment facility fields come from the selected appointment's
+  `Facility` object. `FacilityName`, `Latitude`, and `Longitude` are left blank
+  when absent.
+- It does not set `edrweb_reminders` to `True` and does not set
+  `edrweb_new_user`; a later EDRWeb messaging contact activation flow owns that
+  welcome-message trigger and reminder enabling.
+- For inactive EDRWeb patients, it sends only `urn` and
+  `edrweb_reminders = "False"`, leaving historical EDRWeb context fields intact.
+- It sends the rows through the Turn CSV contacts import API.
+- It raises an error if Turn reports row-level import errors in the API response.
 
 ## `sync_patients`
 

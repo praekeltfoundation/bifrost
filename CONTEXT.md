@@ -36,6 +36,14 @@ _Avoid_: recovery fetch, weekly delta, EDRWeb sync
 A full-reconciliation finding where a locally stored **EDRWeb Patient** is absent from the current **EDRWeb Appointment Reminder Feed**, meaning Bifrost must record that the patient is no longer current for EDRWeb appointment reminder messaging.
 _Avoid_: deletion, local data loss, Reminder Suppressed
 
+**EDRWeb Reminder Eligible**:
+An **EDRWeb Patient** who is current for EDRWeb appointment reminder messaging and has a usable WhatsApp phone number.
+_Avoid_: user should receive messages, active user, opted in
+
+**EDRWeb Messaging Contact Activation**:
+The welcome-message transition that makes a **Turn Contact** ready to receive EDRWeb appointment reminder messaging for an **EDRWeb Patient**.
+_Avoid_: opt in, Turn import step, contact setup
+
 **EDRWeb Appointment Reminder Checkpoint**:
 The latest successfully stored EDRWeb `UpdatedAt` timestamp used to start the next **EDRWeb Appointment Reminder Delta Pull**.
 _Avoid_: cursor, last run time, latest local update
@@ -143,6 +151,9 @@ _Avoid_: suppression reason field, latest delivery error
 - An **EDRWeb Patient** snapshot requires an **EDRWeb Patient Identifier** and an EDRWeb update timestamp
 - An **EDRWeb Appointment Reminder Delta Pull** stores one current local snapshot per **EDRWeb Patient**
 - An **EDRWeb Patient** stores its current **EDRWeb Appointment** records as part of that local snapshot
+- EDRWeb Turn contact updates use local **EDRWeb Patient** snapshots after EDRWeb pull changes have been committed
+- EDRWeb Turn contact update failures do not roll back completed **EDRWeb Appointment Reminder Delta Pull** or **EDRWeb Appointment Reminder Full Reconciliation Pull** snapshot changes
+- EDRWeb Turn contact updates refresh all locally stored **EDRWeb Patient** snapshots rather than only the rows changed by the latest pull
 - An **EDRWeb Patient** may have no current **EDRWeb Appointment** records and still belong to the **EDRWeb Appointment Reminder Feed**
 - An **EDRWeb Patient** may have no captured WhatsApp phone number and still belong to the **EDRWeb Appointment Reminder Feed**
 - An **EDRWeb Appointment Reminder Delta Pull** queries from just before the **EDRWeb Appointment Reminder Checkpoint** to avoid missing same-timestamp EDRWeb updates
@@ -156,6 +167,15 @@ _Avoid_: suppression reason field, latest delivery error
 - A later **EDRWeb Appointment Reminder Feed** record for the same **EDRWeb Patient Identifier** makes the stored **EDRWeb Patient** current again
 - An **EDRWeb Appointment Reminder Feed Removal** is later expressed to Turn through EDRWeb appointment reminder messaging fields only
 - An **EDRWeb Appointment Reminder Feed Removal** must not lead to SyNCH reminder messaging being disabled for a shared **Turn Contact**
+- Expressing that an **EDRWeb Patient** should no longer receive EDRWeb reminders disables EDRWeb reminders without clearing historical EDRWeb patient or appointment context fields
+- An **EDRWeb Patient** is **EDRWeb Reminder Eligible** only while current in the **EDRWeb Appointment Reminder Feed** and reachable on a usable WhatsApp phone number
+- A usable WhatsApp phone number for an **EDRWeb Patient** is normalized the same way as a **Messaging Phone Number**
+- An **EDRWeb Reminder Eligible** **EDRWeb Patient** may have no current **EDRWeb Appointment** records
+- An **EDRWeb Reminder Eligible** **EDRWeb Patient** with multiple current **EDRWeb Appointment** records uses the earliest appointment date for Turn reminder context
+- Turn facility fields for EDRWeb reminder context come from the selected **EDRWeb Appointment**, and may be blank even when the appointment date is present
+- Updating Turn appointment reminder context for an **EDRWeb Reminder Eligible** **EDRWeb Patient** does not directly enable EDRWeb reminders
+- Updating Turn appointment reminder context for an **EDRWeb Reminder Eligible** **EDRWeb Patient** does not trigger **EDRWeb Messaging Contact Activation**
+- **EDRWeb Messaging Contact Activation** enables EDRWeb reminders after current EDRWeb patient and appointment context has been configured on the **Turn Contact**
 - The **EDRWeb Appointment Reminder Feed** returns only upcoming **EDRWeb Appointment** records for reminder sync
 - A prescription references exactly one **SyNCH Patient Identifier**
 - A **Complete Patient Delta** may include a **Patient** whose own record did not change
@@ -257,3 +277,6 @@ _Avoid_: suppression reason field, latest delivery error
 - retiring a shared **Turn Contact** could disable reminders for another **Patient** using the same **Messaging Phone Number** — resolved: shared-line protection is out of scope, and phone-change retirement still disables the old **Turn Contact**
 - "opted out" was used for delivery-triggered reminder disabling — resolved: use **Reminder Suppressed** unless the user explicitly withdrew consent
 - "opt out" for EDRWeb feed removal could be read as SyNCH reminder suppression — resolved: use EDRWeb reminder fields only
+- "user should be receiving messages" was used for EDRWeb reminder sync — resolved: use **EDRWeb Reminder Eligible**
+- setting EDRWeb appointment reminder context could be read as enabling EDRWeb reminders — resolved: reminder enabling happens through a later welcome-message activation, not by directly setting `edrweb_reminders` to true
+- "opt in" for EDRWeb welcome messaging could be read as clinic consent or WhatsApp consent capture — resolved: use **EDRWeb Messaging Contact Activation**
