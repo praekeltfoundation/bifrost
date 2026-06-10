@@ -141,6 +141,7 @@ uv run ./manage.py test
 
 ## Documentation
 
+- [Django admin](docs/admin.md)
 - [Lock app](docs/lock.md)
 - [CCMDD client](docs/ccmdd-client.md)
 - [OTP delivery API](docs/otp-api.md)

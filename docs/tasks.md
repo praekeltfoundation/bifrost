@@ -86,26 +86,6 @@ full reconciliation task for the EDRWeb Appointment Reminder Feed.
 - It wraps the pull, upserts, and inactive marking in a database transaction, so
   a failure rolls back all local database updates made during that run.
 
-## EDRWeb patient admin
-
-The Django admin registers `EDRWebPatient` so support staff can inspect and
-correct local EDRWeb appointment reminder snapshots.
-
-- The editable fields are `patient_id`, `phone_number`, `updated_at`,
-  `is_active`, and `appointments`.
-- `payload` is read-only because it stores residual upstream fields for
-  inspection and troubleshooting.
-- `feed_removed_at` is read-only in admin. Deactivating an EDRWeb patient sets
-  it to the current Bifrost processing time, and reactivating the patient clears
-  it.
-- `updated_at` cannot be set in the future because Bifrost uses the latest
-  stored value as the next EDRWeb delta checkpoint.
-- `appointments` must be a JSON list of objects. Each appointment must include
-  `AppointmentDate` in `YYYY-MM-DD` format and may include `Facility` with
-  `FacilityName`, `Latitude`, and `Longitude`.
-- The model field help text documents each field's source and messaging use so
-  manual admin edits have local guidance.
-
 ## `sync_patients`
 
 `synch.tasks.sync_patients` incrementally synchronizes patients from the CCMDD API into the local database.
