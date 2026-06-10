@@ -37,8 +37,8 @@ the EDRWeb Appointment Reminder Feed.
 - Celery Beat schedules it to run every 4 hours.
 - It skips without acquiring the lock when `EDRWEB_BASE_URL`, `EDRWEB_USERNAME`,
   or `EDRWEB_PASSWORD` is not configured.
-- It acquires the `sync-edrweb-appointment-reminder-delta` lock before starting,
-  so only one EDRWeb appointment reminder delta pull can proceed at a time.
+- It acquires the shared `sync-edrweb-appointment-reminders` lock before
+  starting, so a delta pull and full reconciliation pull cannot overlap.
 - It derives the delta checkpoint from the latest stored `EDRWebPatient.updated_at`
   value.
 - If no EDRWeb patient snapshots exist locally, it omits `updatedSince`.
@@ -51,6 +51,9 @@ the EDRWeb Appointment Reminder Feed.
   JSON column.
 - Missing `PhoneNumber` is stored as a blank string.
 - Missing `Appointments` is stored as an empty list.
+- A returned record marks the stored EDRWeb patient snapshot as active and clears
+  `feed_removed_at`, even if the returned record is older than the stored
+  snapshot.
 - It rejects records without `PersonId` or timezone-aware `UpdatedAt`, and records
   whose `Appointments` value is not a list.
 - It ignores incoming records that are older than the currently stored snapshot
@@ -58,6 +61,30 @@ the EDRWeb Appointment Reminder Feed.
 - It wraps the pull and upserts in a database transaction, so a failure rolls back
   all local database updates made during that run.
 - If it cannot get the lock, it logs a warning and does not attempt any API pull.
+
+## `sync_appointment_reminder_full_reconciliation`
+
+`edrweb.tasks.sync_appointment_reminder_full_reconciliation` is the scheduled
+full reconciliation task for the EDRWeb Appointment Reminder Feed.
+
+- Celery Beat schedules it to run weekly on Monday at 02:00 UTC.
+- It skips without acquiring the lock when `EDRWEB_BASE_URL`, `EDRWEB_USERNAME`,
+  or `EDRWEB_PASSWORD` is not configured.
+- It acquires the shared `sync-edrweb-appointment-reminders` lock before
+  starting, so a full reconciliation pull and delta pull cannot overlap.
+- If the shared lock is already held, it retries after 15 minutes instead of
+  skipping the run.
+- It omits `updatedSince`, so the EDRWeb API returns the current full
+  appointment reminder feed.
+- It stores each returned record through the same snapshot upsert rules as the
+  delta task.
+- After the full feed has completed successfully, it marks active local
+  `EDRWebPatient` snapshots that were absent from the full feed as inactive and
+  stores `feed_removed_at` using Bifrost processing time.
+- It does not update Turn contacts. A later Turn sync should use inactive
+  `EDRWebPatient` snapshots to stop EDRWeb appointment reminder messaging.
+- It wraps the pull, upserts, and inactive marking in a database transaction, so
+  a failure rolls back all local database updates made during that run.
 
 ## `sync_patients`
 
