@@ -16,6 +16,10 @@ class EDRWebPatient(models.Model):
         blank=True,
     )
     updated_at: models.DateTimeField[datetime, datetime] = models.DateTimeField()
+    is_active: models.BooleanField[bool, bool] = models.BooleanField(default=True)
+    feed_removed_at: models.DateTimeField[datetime | None, datetime | None] = (
+        models.DateTimeField(null=True, blank=True)
+    )
     appointments: models.JSONField[list[Any], list[Any]] = models.JSONField(
         default=list,
     )

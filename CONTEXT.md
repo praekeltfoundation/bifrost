@@ -28,6 +28,14 @@ _Avoid_: persons endpoint, appointment-reminders endpoint, EDRWeb sync
 A routine incremental pull of **EDRWeb Patient** records changed since the last completed appointment-reminder pull.
 _Avoid_: frequent fetch, updated data fetch, EDRWeb sync
 
+**EDRWeb Appointment Reminder Full Reconciliation Pull**:
+A periodic full pull of the **EDRWeb Appointment Reminder Feed** that omits `updatedSince` so Bifrost can compare current feed membership with locally stored **EDRWeb Patient** snapshots.
+_Avoid_: recovery fetch, weekly delta, EDRWeb sync
+
+**EDRWeb Appointment Reminder Feed Removal**:
+A full-reconciliation finding where a locally stored **EDRWeb Patient** is absent from the current **EDRWeb Appointment Reminder Feed**, meaning Bifrost must record that the patient is no longer current for EDRWeb appointment reminder messaging.
+_Avoid_: deletion, local data loss, Reminder Suppressed
+
 **EDRWeb Appointment Reminder Checkpoint**:
 The latest successfully stored EDRWeb `UpdatedAt` timestamp used to start the next **EDRWeb Appointment Reminder Delta Pull**.
 _Avoid_: cursor, last run time, latest local update
@@ -140,6 +148,14 @@ _Avoid_: suppression reason field, latest delivery error
 - An **EDRWeb Appointment Reminder Delta Pull** queries from just before the **EDRWeb Appointment Reminder Checkpoint** to avoid missing same-timestamp EDRWeb updates
 - An **EDRWeb Appointment Reminder Delta Pull** has no **EDRWeb Appointment Reminder Checkpoint** before any **EDRWeb Patient** snapshot exists locally
 - An **EDRWeb Appointment Reminder Checkpoint** advances only after a successful **EDRWeb Appointment Reminder Delta Pull**
+- An **EDRWeb Appointment Reminder Full Reconciliation Pull** omits `updatedSince` and compares current **EDRWeb Appointment Reminder Feed** membership with stored **EDRWeb Patient** snapshots
+- An **EDRWeb Appointment Reminder Feed Removal** is detected only by a completed **EDRWeb Appointment Reminder Full Reconciliation Pull**
+- An **EDRWeb Appointment Reminder Feed Removal** does not prove why the **EDRWeb Patient** left the feed
+- An **EDRWeb Appointment Reminder Feed Removal** means Bifrost must record that the **EDRWeb Patient** is no longer current for EDRWeb appointment reminder messaging
+- A stored **EDRWeb Patient** snapshot remains locally available after an **EDRWeb Appointment Reminder Feed Removal**
+- A later **EDRWeb Appointment Reminder Feed** record for the same **EDRWeb Patient Identifier** makes the stored **EDRWeb Patient** current again
+- An **EDRWeb Appointment Reminder Feed Removal** is later expressed to Turn through EDRWeb appointment reminder messaging fields only
+- An **EDRWeb Appointment Reminder Feed Removal** must not lead to SyNCH reminder messaging being disabled for a shared **Turn Contact**
 - The **EDRWeb Appointment Reminder Feed** returns only upcoming **EDRWeb Appointment** records for reminder sync
 - A prescription references exactly one **SyNCH Patient Identifier**
 - A **Complete Patient Delta** may include a **Patient** whose own record did not change
@@ -240,3 +256,4 @@ _Avoid_: suppression reason field, latest delivery error
 - "all contact fields" on the new **Turn Contact** could be read as Bifrost explicitly setting reminder consent — resolved: Bifrost sets the welcome trigger, and welcome messaging re-enables reminders on the new **Active Messaging Contact**
 - retiring a shared **Turn Contact** could disable reminders for another **Patient** using the same **Messaging Phone Number** — resolved: shared-line protection is out of scope, and phone-change retirement still disables the old **Turn Contact**
 - "opted out" was used for delivery-triggered reminder disabling — resolved: use **Reminder Suppressed** unless the user explicitly withdrew consent
+- "opt out" for EDRWeb feed removal could be read as SyNCH reminder suppression — resolved: use EDRWeb reminder fields only

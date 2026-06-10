@@ -161,6 +161,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "edrweb.tasks.sync_appointment_reminder_delta",
         "schedule": crontab(minute=0, hour="*/4"),
     },
+    "sync-edrweb-appointment-reminder-full-reconciliation": {
+        "task": "edrweb.tasks.sync_appointment_reminder_full_reconciliation",
+        "schedule": crontab(minute=0, hour=2, day_of_week="monday"),
+    },
 }
 
 CCMDD_BASE_URL = env("CCMDD_BASE_URL", default="")

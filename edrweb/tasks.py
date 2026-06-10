@@ -8,12 +8,15 @@ from celery import shared_task
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Max
+from django.utils import timezone as django_timezone
 
 from edrweb.api import EDRWebAPIClient
 from edrweb.models import EDRWebPatient
 from lock.models import Lock, LockAcquisitionError
 
-EDRWEB_APPOINTMENT_REMINDER_DELTA_LOCK_KEY = "sync-edrweb-appointment-reminder-delta"
+EDRWEB_APPOINTMENT_REMINDER_SYNC_LOCK_KEY = "sync-edrweb-appointment-reminders"
+EDRWEB_APPOINTMENT_REMINDER_DELTA_LOCK_KEY = EDRWEB_APPOINTMENT_REMINDER_SYNC_LOCK_KEY
+FULL_RECONCILIATION_LOCK_RETRY_SECONDS = 15 * 60
 logger = logging.getLogger(__name__)
 
 
@@ -73,9 +76,58 @@ def sync_appointment_reminder_delta() -> None:
         lock.release()
 
     logger.info(
-        "Synced %s EDRWeb appointment reminder record%s.",
+        "Synced EDRWeb appointment reminder records: %s.",
         synced,
-        "" if synced == 1 else "s",
+    )
+
+
+@shared_task(bind=True)
+def sync_appointment_reminder_full_reconciliation(self: Any) -> None:
+    if not _is_api_configured():
+        logger.warning(
+            "Skipping EDRWeb appointment reminder full reconciliation because "
+            "EDRWEB_BASE_URL, EDRWEB_USERNAME, or EDRWEB_PASSWORD is not configured.",
+        )
+        return
+
+    try:
+        lock = Lock.acquire(key=EDRWEB_APPOINTMENT_REMINDER_SYNC_LOCK_KEY)
+    except LockAcquisitionError as exc:
+        logger.warning(
+            "Retrying EDRWeb appointment reminder full reconciliation because lock "
+            "'%s' is already held.",
+            EDRWEB_APPOINTMENT_REMINDER_SYNC_LOCK_KEY,
+        )
+        raise self.retry(
+            countdown=FULL_RECONCILIATION_LOCK_RETRY_SECONDS,
+            max_retries=None,
+        ) from exc
+
+    try:
+        synced_patient_ids: set[str] = set()
+        with transaction.atomic():
+            for record in _get_client().iter_appointment_reminder_records(
+                updated_since=None,
+            ):
+                patient_id = record.get("PersonId")
+                if isinstance(patient_id, str) and patient_id:
+                    synced_patient_ids.add(patient_id)
+                _upsert_appointment_reminder_record(record)
+                lock.refresh()
+
+            EDRWebPatient.objects.filter(is_active=True).exclude(
+                patient_id__in=synced_patient_ids,
+            ).update(
+                is_active=False,
+                feed_removed_at=django_timezone.now(),
+            )
+    finally:
+        lock.release()
+
+    logger.info(
+        "Completed EDRWeb appointment reminder full reconciliation. "
+        "Records synced: %s.",
+        len(synced_patient_ids),
     )
 
 
@@ -99,6 +151,14 @@ def _upsert_appointment_reminder_record(record: dict[str, Any]) -> bool:
         EDRWebPatient.objects.select_for_update().filter(patient_id=patient_id).first()
     )
     if existing_patient is not None and updated_at < existing_patient.updated_at:
+        if (
+            not existing_patient.is_active
+            or existing_patient.feed_removed_at is not None
+        ):
+            existing_patient.is_active = True
+            existing_patient.feed_removed_at = None
+            existing_patient.save(update_fields=["is_active", "feed_removed_at"])
+            return True
         return False
 
     EDRWebPatient.objects.update_or_create(
@@ -106,6 +166,8 @@ def _upsert_appointment_reminder_record(record: dict[str, Any]) -> bool:
         defaults={
             "phone_number": phone_number,
             "updated_at": updated_at,
+            "is_active": True,
+            "feed_removed_at": None,
             "appointments": appointments,
             "payload": payload,
         },
