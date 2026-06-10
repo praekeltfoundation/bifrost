@@ -24,6 +24,14 @@ _Avoid_: person id, local patient id, SyNCH patient id
 The EDRWeb source of consenting DR-TB patients and their milestone appointment dates for WhatsApp reminders.
 _Avoid_: persons endpoint, appointment-reminders endpoint, EDRWeb sync
 
+**EDRWeb Appointment Reminder Delta Pull**:
+A routine incremental pull of **EDRWeb Patient** records changed since the last completed appointment-reminder pull.
+_Avoid_: frequent fetch, updated data fetch, EDRWeb sync
+
+**EDRWeb Appointment Reminder Checkpoint**:
+The latest successfully stored EDRWeb `UpdatedAt` timestamp used to start the next **EDRWeb Appointment Reminder Delta Pull**.
+_Avoid_: cursor, last run time, latest local update
+
 **EDRWeb Appointment**:
 A scheduled milestone appointment returned by the **EDRWeb Appointment Reminder Feed**.
 _Avoid_: SyNCH return date, prescription appointment, local appointment
@@ -124,6 +132,14 @@ _Avoid_: suppression reason field, latest delivery error
 - An **EDRWeb Patient** is stored separately from a SyNCH CCMDD **Patient**
 - An **EDRWeb Patient** has no shared patient identifier with a SyNCH CCMDD **Patient**
 - The **EDRWeb Appointment Reminder Feed** may contain many **EDRWeb Patient** records
+- An **EDRWeb Patient** snapshot requires an **EDRWeb Patient Identifier** and an EDRWeb update timestamp
+- An **EDRWeb Appointment Reminder Delta Pull** stores one current local snapshot per **EDRWeb Patient**
+- An **EDRWeb Patient** stores its current **EDRWeb Appointment** records as part of that local snapshot
+- An **EDRWeb Patient** may have no current **EDRWeb Appointment** records and still belong to the **EDRWeb Appointment Reminder Feed**
+- An **EDRWeb Patient** may have no captured WhatsApp phone number and still belong to the **EDRWeb Appointment Reminder Feed**
+- An **EDRWeb Appointment Reminder Delta Pull** queries from just before the **EDRWeb Appointment Reminder Checkpoint** to avoid missing same-timestamp EDRWeb updates
+- An **EDRWeb Appointment Reminder Delta Pull** has no **EDRWeb Appointment Reminder Checkpoint** before any **EDRWeb Patient** snapshot exists locally
+- An **EDRWeb Appointment Reminder Checkpoint** advances only after a successful **EDRWeb Appointment Reminder Delta Pull**
 - The **EDRWeb Appointment Reminder Feed** returns only upcoming **EDRWeb Appointment** records for reminder sync
 - A prescription references exactly one **SyNCH Patient Identifier**
 - A **Complete Patient Delta** may include a **Patient** whose own record did not change
