@@ -126,7 +126,7 @@ class EDRWebPatient(models.Model):
         return row
 
     def get_turn_activation_row(self, timestamp: str) -> dict[str, object] | None:
-        phone_number = _normalize_phone_number(self.phone_number)
+        phone_number = normalize_phone_number(self.phone_number)
         if phone_number is None:
             return None
 
