@@ -3,20 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, cast
 
-import phonenumbers
 from django.db import models
 
-
-def _normalize_phone_number(value: str) -> str | None:
-    try:
-        phone_number = phonenumbers.parse(value, "ZA")
-    except phonenumbers.NumberParseException:
-        return None
-
-    return phonenumbers.format_number(
-        phone_number,
-        phonenumbers.PhoneNumberFormat.E164,
-    )
+from bifrost.phone_numbers import normalize_phone_number
 
 
 class EDRWebPatient(models.Model):
@@ -88,7 +77,7 @@ class EDRWebPatient(models.Model):
         return self.patient_id
 
     def get_turn_sync_row(self) -> dict[str, object] | None:
-        phone_number = _normalize_phone_number(self.phone_number)
+        phone_number = normalize_phone_number(self.phone_number)
         if phone_number is None:
             return None
 

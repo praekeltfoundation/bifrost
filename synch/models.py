@@ -4,21 +4,10 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-import phonenumbers
 from django.contrib.auth.models import User
 from django.db import models
 
-
-def _normalize_phone_number(value: str) -> str | None:
-    try:
-        phone_number = phonenumbers.parse(value, "ZA")
-    except phonenumbers.NumberParseException:
-        return None
-
-    return phonenumbers.format_number(
-        phone_number,
-        phonenumbers.PhoneNumberFormat.E164,
-    )
+from bifrost.phone_numbers import normalize_phone_number
 
 
 def _parse_return_date(value: object) -> date | None:
@@ -74,7 +63,7 @@ class Patient(models.Model):
     @property
     def messaging_phone_number(self) -> str | None:
         for prescription in self.prescriptions.order_by("-date_created", "-pk"):
-            normalized_phone_number = _normalize_phone_number(
+            normalized_phone_number = normalize_phone_number(
                 prescription.patient_phone,
             )
             if normalized_phone_number is not None:
@@ -218,7 +207,7 @@ class Prescription(models.Model):
 
     @property
     def normalized_patient_phone(self) -> str | None:
-        return _normalize_phone_number(self.patient_phone)
+        return normalize_phone_number(self.patient_phone)
 
     def get_future_return_dates(self, today: date) -> list[date]:
         appointment_dates: list[date] = []
