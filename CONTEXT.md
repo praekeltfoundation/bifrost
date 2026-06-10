@@ -44,6 +44,10 @@ _Avoid_: user should receive messages, active user, opted in
 The welcome-message transition that makes a **Turn Contact** ready to receive EDRWeb appointment reminder messaging for an **EDRWeb Patient**.
 _Avoid_: opt in, Turn import step, contact setup
 
+**EDRWeb Messaging Contact Activated**:
+A historical state meaning EDRWeb welcome-message activation has already been accepted for an **EDRWeb Patient** and must not be triggered again.
+_Avoid_: new patient, new user, invite sent
+
 **EDRWeb Appointment Reminder Checkpoint**:
 The latest successfully stored EDRWeb `UpdatedAt` timestamp used to start the next **EDRWeb Appointment Reminder Delta Pull**.
 _Avoid_: cursor, last run time, latest local update
@@ -171,11 +175,18 @@ _Avoid_: suppression reason field, latest delivery error
 - An **EDRWeb Patient** is **EDRWeb Reminder Eligible** only while current in the **EDRWeb Appointment Reminder Feed** and reachable on a usable WhatsApp phone number
 - A usable WhatsApp phone number for an **EDRWeb Patient** is normalized the same way as a **Messaging Phone Number**
 - An **EDRWeb Reminder Eligible** **EDRWeb Patient** may have no current **EDRWeb Appointment** records
+- **EDRWeb Reminder Eligible** does not require appointment facility context
 - An **EDRWeb Reminder Eligible** **EDRWeb Patient** with multiple current **EDRWeb Appointment** records uses the earliest appointment date for Turn reminder context
 - Turn facility fields for EDRWeb reminder context come from the selected **EDRWeb Appointment**, and may be blank even when the appointment date is present
 - Updating Turn appointment reminder context for an **EDRWeb Reminder Eligible** **EDRWeb Patient** does not directly enable EDRWeb reminders
 - Updating Turn appointment reminder context for an **EDRWeb Reminder Eligible** **EDRWeb Patient** does not trigger **EDRWeb Messaging Contact Activation**
 - **EDRWeb Messaging Contact Activation** enables EDRWeb reminders after current EDRWeb patient and appointment context has been configured on the **Turn Contact**
+- **EDRWeb Messaging Contact Activation** happens only after current EDRWeb patient and appointment context has been accepted by messaging
+- **EDRWeb Messaging Contact Activation** is triggered by setting `edrweb_new_user` to an activation timestamp, without directly setting `edrweb_reminders` to true
+- **EDRWeb Messaging Contact Activated** is recorded only after messaging accepts **EDRWeb Messaging Contact Activation**
+- Failed EDRWeb activation rows remain retryable without blocking successfully accepted EDRWeb activation rows
+- A later phone number change for an **EDRWeb Patient** does not clear **EDRWeb Messaging Contact Activated**
+- Re-activating EDRWeb messaging after an EDRWeb phone number change is out of scope until Bifrost tracks the active EDRWeb **Turn Contact**
 - The **EDRWeb Appointment Reminder Feed** returns only upcoming **EDRWeb Appointment** records for reminder sync
 - A prescription references exactly one **SyNCH Patient Identifier**
 - A **Complete Patient Delta** may include a **Patient** whose own record did not change
@@ -280,3 +291,5 @@ _Avoid_: suppression reason field, latest delivery error
 - "user should be receiving messages" was used for EDRWeb reminder sync — resolved: use **EDRWeb Reminder Eligible**
 - setting EDRWeb appointment reminder context could be read as enabling EDRWeb reminders — resolved: reminder enabling happens through a later welcome-message activation, not by directly setting `edrweb_reminders` to true
 - "opt in" for EDRWeb welcome messaging could be read as clinic consent or WhatsApp consent capture — resolved: use **EDRWeb Messaging Contact Activation**
+- "new patient" and "new user" for EDRWeb could be read as upstream patient state — resolved: use **EDRWeb Messaging Contact Activation** for the trigger and **EDRWeb Messaging Contact Activated** for the persisted state
+- EDRWeb phone-number changes could be read as requiring welcome-message reactivation — resolved: current activation state is **EDRWeb Patient**-level, not **Turn Contact**-level
