@@ -14,6 +14,7 @@ from edrweb.tasks import (
     sync_appointment_reminder_delta,
     sync_appointment_reminder_full_reconciliation,
     sync_appointment_reminders_to_turn,
+    sync_changed_patient_phone_numbers_to_turn,
     sync_messaging_contact_activations_to_turn,
 )
 from lock.models import Lock
@@ -140,6 +141,8 @@ class SyncAppointmentReminderDeltaTaskTests(TestCase):
                 "updates to Turn.",
                 "INFO:edrweb.tasks:Imported 1 EDRWeb messaging contact "
                 "activations to Turn.",
+                "INFO:edrweb.tasks:Imported 0 EDRWeb changed patient phone "
+                "numbers to Turn.",
             ],
         )
 
@@ -191,6 +194,8 @@ class SyncAppointmentReminderDeltaTaskTests(TestCase):
             ]
         )
         patient = EDRWebPatient.objects.get(patient_id="edrweb-patient-1")
+        self.assertEqual(patient.phone_number, "+27721234567")
+        self.assertEqual(patient.active_messaging_phone_number, "+27721234567")
         self.assertTrue(patient.messaging_contact_activated)
 
     def test_fetches_from_just_before_latest_stored_update(self):
@@ -696,6 +701,8 @@ class SyncAppointmentReminderFullReconciliationTaskTests(TestCase):
             ]
         )
         patient = EDRWebPatient.objects.get(patient_id="edrweb-patient-1")
+        self.assertEqual(patient.phone_number, "+27721234567")
+        self.assertEqual(patient.active_messaging_phone_number, "+27721234567")
         self.assertTrue(patient.messaging_contact_activated)
 
 
@@ -806,6 +813,7 @@ class SyncMessagingContactActivationsToTurnTests(TestCase):
         EDRWebPatient.objects.create(
             patient_id="already-activated-patient",
             phone_number="+27720000001",
+            active_messaging_phone_number="+27720000001",
             updated_at=datetime(2026, 5, 30, 12, 22, tzinfo=timezone.utc),
             messaging_contact_activated=True,
             appointments=[],
@@ -884,5 +892,171 @@ class SyncMessagingContactActivationsToTurnTests(TestCase):
         )
         successful_patient.refresh_from_db()
         failed_patient.refresh_from_db()
+        self.assertEqual(
+            successful_patient.active_messaging_phone_number,
+            "+27720000001",
+        )
+        self.assertEqual(failed_patient.active_messaging_phone_number, "")
         self.assertTrue(successful_patient.messaging_contact_activated)
         self.assertFalse(failed_patient.messaging_contact_activated)
+
+
+@override_settings(
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+    TURN_BASE_URL="https://whatsapp.turn.io",
+    TURN_TOKEN=TEST_PASSWORD,
+)
+class SyncChangedPatientPhoneNumbersToTurnTests(TestCase):
+    def test_skips_phone_numbers_that_match_after_normalization(self):
+        EDRWebPatient.objects.create(
+            patient_id="normalized-match-patient",
+            phone_number="0721234567",
+            active_messaging_phone_number="+27721234567",
+            messaging_contact_activated=True,
+            updated_at=datetime(2026, 5, 30, 12, 22, tzinfo=timezone.utc),
+            appointments=[],
+            payload={},
+        )
+
+        with (
+            patch("edrweb.tasks.TurnAPIClient") as turn_client_class,
+            self.assertLogs("edrweb.tasks", level="INFO") as logs,
+        ):
+            sync_changed_patient_phone_numbers_to_turn()
+
+        turn_client_class.assert_not_called()
+        patient = EDRWebPatient.objects.get(patient_id="normalized-match-patient")
+        self.assertEqual(patient.phone_number, "+27721234567")
+        self.assertEqual(
+            logs.output,
+            [
+                "INFO:edrweb.tasks:Imported 0 EDRWeb changed patient phone numbers "
+                "to Turn."
+            ],
+        )
+
+    def test_retires_old_phone_before_activating_changed_phone(self):
+        patient = EDRWebPatient.objects.create(
+            patient_id="changed-phone-patient",
+            phone_number="+27720000002",
+            active_messaging_phone_number="+27720000001",
+            messaging_contact_activated=True,
+            updated_at=datetime(2026, 5, 30, 12, 22, tzinfo=timezone.utc),
+            appointments=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+        activation_time = datetime(2026, 6, 10, 8, 9, 10, tzinfo=timezone.utc)
+
+        with (
+            patch("edrweb.tasks.TurnAPIClient", return_value=turn_client),
+            patch("edrweb.tasks.django_timezone.now", return_value=activation_time),
+        ):
+            sync_changed_patient_phone_numbers_to_turn()
+
+        turn_client.import_contacts.assert_has_calls(
+            [
+                call(
+                    [
+                        {
+                            "urn": "+27720000001",
+                            "edrweb_reminders": "False",
+                        }
+                    ]
+                ),
+                call(
+                    [
+                        {
+                            "urn": "+27720000002",
+                            "edrweb_new_user": "2026-06-10T08:09:10+00:00",
+                        }
+                    ]
+                ),
+            ]
+        )
+        patient.refresh_from_db()
+        self.assertEqual(patient.active_messaging_phone_number, "+27720000002")
+        self.assertTrue(patient.messaging_contact_activated)
+
+    def test_does_not_activate_changed_phone_when_old_phone_retirement_fails(self):
+        patient = EDRWebPatient.objects.create(
+            patient_id="changed-phone-patient",
+            phone_number="+27720000002",
+            active_messaging_phone_number="+27720000001",
+            messaging_contact_activated=True,
+            updated_at=datetime(2026, 5, 30, 12, 22, tzinfo=timezone.utc),
+            appointments=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = [
+            {"urn": "+27720000001", "edrweb_reminders": "ERROR: failed"}
+        ]
+        activation_time = datetime(2026, 6, 10, 8, 9, 10, tzinfo=timezone.utc)
+
+        with (
+            patch("edrweb.tasks.TurnAPIClient", return_value=turn_client),
+            patch("edrweb.tasks.django_timezone.now", return_value=activation_time),
+        ):
+            sync_changed_patient_phone_numbers_to_turn()
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27720000001",
+                    "edrweb_reminders": "False",
+                }
+            ]
+        )
+        patient.refresh_from_db()
+        self.assertEqual(patient.active_messaging_phone_number, "+27720000001")
+        self.assertTrue(patient.messaging_contact_activated)
+
+    def test_does_not_advance_changed_phone_when_new_phone_activation_fails(self):
+        patient = EDRWebPatient.objects.create(
+            patient_id="changed-phone-patient",
+            phone_number="+27720000002",
+            active_messaging_phone_number="+27720000001",
+            messaging_contact_activated=True,
+            updated_at=datetime(2026, 5, 30, 12, 22, tzinfo=timezone.utc),
+            appointments=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.side_effect = [
+            [],
+            [{"urn": "+27720000002", "edrweb_new_user": "ERROR: failed"}],
+        ]
+        activation_time = datetime(2026, 6, 10, 8, 9, 10, tzinfo=timezone.utc)
+
+        with (
+            patch("edrweb.tasks.TurnAPIClient", return_value=turn_client),
+            patch("edrweb.tasks.django_timezone.now", return_value=activation_time),
+        ):
+            sync_changed_patient_phone_numbers_to_turn()
+
+        turn_client.import_contacts.assert_has_calls(
+            [
+                call(
+                    [
+                        {
+                            "urn": "+27720000001",
+                            "edrweb_reminders": "False",
+                        }
+                    ]
+                ),
+                call(
+                    [
+                        {
+                            "urn": "+27720000002",
+                            "edrweb_new_user": "2026-06-10T08:09:10+00:00",
+                        }
+                    ]
+                ),
+            ]
+        )
+        patient.refresh_from_db()
+        self.assertEqual(patient.active_messaging_phone_number, "+27720000001")
+        self.assertTrue(patient.messaging_contact_activated)
