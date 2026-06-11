@@ -19,6 +19,8 @@ jobs:
         run: uv run ruff check .
       - name: Check types
         run: uv run ty check
+      - name: Check migrations
+        run: uv run ./manage.py makemigrations --check --dry-run
       - name: Run tests
         run: uv run ./manage.py test
 
