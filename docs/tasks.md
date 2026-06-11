@@ -62,8 +62,11 @@ the EDRWeb Appointment Reminder Feed.
   all local database updates made during that run.
 - After the local transaction commits, it calls `sync_appointment_reminders_to_turn`
   while still holding the EDRWeb appointment reminder lock.
+- If the appointment reminder Turn import succeeds, it calls
+  `sync_messaging_contact_activations_to_turn` while still holding the same lock.
 - If the Turn import fails, the completed local EDRWeb snapshot changes remain
-  committed and a later run can retry Turn from the local snapshots.
+  committed, EDRWeb messaging contact activation is not attempted, and a later
+  run can retry Turn from the local snapshots.
 - If it cannot get the lock, it logs a warning and does not attempt any API pull.
 
 ## `sync_appointment_reminder_full_reconciliation`
@@ -89,8 +92,11 @@ full reconciliation task for the EDRWeb Appointment Reminder Feed.
   a failure rolls back all local database updates made during that run.
 - After the local transaction commits, it calls `sync_appointment_reminders_to_turn`
   while still holding the EDRWeb appointment reminder lock.
+- If the appointment reminder Turn import succeeds, it calls
+  `sync_messaging_contact_activations_to_turn` while still holding the same lock.
 - If the Turn import fails, the completed local EDRWeb snapshot changes remain
-  committed and a later run can retry Turn from the local snapshots.
+  committed, EDRWeb messaging contact activation is not attempted, and a later
+  run can retry Turn from the local snapshots.
 
 ## `sync_appointment_reminders_to_turn`
 
@@ -111,12 +117,37 @@ reminder contact fields in Turn from locally stored `EDRWebPatient` snapshots.
   `Facility` object. `FacilityName`, `Latitude`, and `Longitude` are left blank
   when absent.
 - It does not set `edrweb_reminders` to `True` and does not set
-  `edrweb_new_user`; a later EDRWeb messaging contact activation flow owns that
-  welcome-message trigger and reminder enabling.
+  `edrweb_new_user`; `sync_messaging_contact_activations_to_turn` owns that
+  welcome-message trigger.
 - For inactive EDRWeb patients, it sends only `urn` and
   `edrweb_reminders = "False"`, leaving historical EDRWeb context fields intact.
 - It sends the rows through the Turn CSV contacts import API.
 - It raises an error if Turn reports row-level import errors in the API response.
+
+## `sync_messaging_contact_activations_to_turn`
+
+`edrweb.tasks.sync_messaging_contact_activations_to_turn` imports the
+`edrweb_new_user` contact field into Turn for EDRWeb patients whose welcome
+message has not yet been triggered.
+
+- It runs only after `sync_appointment_reminders_to_turn` succeeds, so the Turn
+  contact already has current EDRWeb patient and appointment context.
+- It filters `EDRWebPatient` records to active rows where
+  `messaging_contact_activated` is `False`.
+- It normalizes `EDRWebPatient.phone_number` to E.164 with `phonenumbers`,
+  assuming South Africa (`ZA`) when no country code is provided.
+- It skips EDRWeb patients whose phone number cannot be normalized.
+- It does not require appointment or facility context.
+- It sets `edrweb_new_user` to a single `timezone.now().isoformat()` value
+  generated once for the batch.
+- It does not directly set `edrweb_reminders` to `True`; the welcome-message
+  activation flow owns reminder enabling.
+- It logs Turn row-level import errors and does not mark those EDRWeb patients
+  as activated.
+- It updates `messaging_contact_activated` to `True` for all successfully
+  imported EDRWeb patients.
+- It does not clear `messaging_contact_activated` when an EDRWeb patient's phone
+  number later changes.
 
 ## `sync_patients`
 

@@ -85,6 +85,7 @@ def sync_appointment_reminder_delta() -> None:
             synced,
         )
         sync_appointment_reminders_to_turn(lock)
+        sync_messaging_contact_activations_to_turn(lock)
     finally:
         lock.release()
 
@@ -135,6 +136,7 @@ def sync_appointment_reminder_full_reconciliation(self: Any) -> None:
             len(synced_patient_ids),
         )
         sync_appointment_reminders_to_turn(lock)
+        sync_messaging_contact_activations_to_turn(lock)
     finally:
         lock.release()
 
@@ -213,5 +215,57 @@ def sync_appointment_reminders_to_turn(lock: Lock | None = None) -> None:
 
     logger.info(
         "Imported %s EDRWeb appointment reminder updates to Turn.",
+        len(rows),
+    )
+
+
+def sync_messaging_contact_activations_to_turn(lock: Lock | None = None) -> None:
+    timestamp = django_timezone.now().isoformat()
+    rows: list[dict[str, object]] = []
+    activation_attempts: list[tuple[str, str]] = []
+
+    for patient in EDRWebPatient.objects.filter(
+        is_active=True,
+        messaging_contact_activated=False,
+    ).order_by("pk"):
+        row = patient.get_turn_activation_row(timestamp)
+        if row is None:
+            logger.info(
+                "EDRWeb Patient %s does not have a usable WhatsApp phone number, "
+                "skipping messaging contact activation.",
+                patient.patient_id,
+            )
+            continue
+
+        urn = str(row["urn"])
+        rows.append(row)
+        activation_attempts.append((patient.patient_id, urn))
+        if lock is not None:
+            lock.refresh()
+
+    if not rows:
+        logger.info("Imported 0 EDRWeb messaging contact activations to Turn.")
+        return
+
+    errors = _get_turn_client().import_contacts(rows)
+    failed_urns: set[str] = set()
+    if errors:
+        failed_urns = {error.get("urn") or "" for error in errors}
+        logger.error(
+            "Turn returned import errors for %d EDRWeb messaging contact "
+            "activation row(s): %s",
+            len(errors),
+            repr(errors),
+        )
+
+    updated_patient_ids = [
+        patient_id for patient_id, urn in activation_attempts if urn not in failed_urns
+    ]
+    EDRWebPatient.objects.filter(patient_id__in=updated_patient_ids).update(
+        messaging_contact_activated=True,
+    )
+
+    logger.info(
+        "Imported %s EDRWeb messaging contact activations to Turn.",
         len(rows),
     )

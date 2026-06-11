@@ -49,14 +49,16 @@ The `edrweb` app registers `EDRWebPatient` so support staff can inspect and
 correct local EDRWeb appointment reminder snapshots.
 
 - Listed fields: `patient_id`, `phone_number`, `updated_at`, `is_active`,
-  `feed_removed_at`.
+  `messaging_contact_activated`, `feed_removed_at`.
 - Search fields: `patient_id`, `phone_number`.
 - Editable fields: `patient_id`, `phone_number`, `updated_at`, `is_active`,
-  and `appointments`.
+  `messaging_contact_activated`, and `appointments`.
 - `payload` is read-only because it stores residual upstream EDRWeb fields that
   were not promoted into explicit model columns.
 - `feed_removed_at` is read-only. Deactivating an EDRWeb patient sets it to the
   current Bifrost processing time; reactivating the patient clears it.
+- `messaging_contact_activated` records whether Turn has accepted the
+  `edrweb_new_user` activation trigger for this EDRWeb patient.
 - `updated_at` cannot be set in the future because Bifrost uses the latest
   stored value as the next EDRWeb delta checkpoint.
 - `appointments` must be a JSON list of objects. Each appointment must include

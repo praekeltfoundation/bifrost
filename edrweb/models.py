@@ -53,6 +53,14 @@ class EDRWebPatient(models.Model):
             ),
         )
     )
+    messaging_contact_activated: models.BooleanField[bool, bool] = models.BooleanField(
+        default=False,
+        help_text=(
+            "Whether Turn has accepted the EDRWeb welcome-message activation "
+            "trigger for this EDRWeb Patient. Once set, Bifrost does not "
+            "trigger edrweb_new_user again for this patient."
+        ),
+    )
     appointments: models.JSONField[list[Any], list[Any]] = models.JSONField(
         default=list,
         blank=True,
@@ -116,6 +124,16 @@ class EDRWebPatient(models.Model):
             row["edrweb_appointment_facility_longitude"] = longitude
 
         return row
+
+    def get_turn_activation_row(self, timestamp: str) -> dict[str, object] | None:
+        phone_number = normalize_phone_number(self.phone_number)
+        if phone_number is None:
+            return None
+
+        return {
+            "urn": phone_number,
+            "edrweb_new_user": timestamp,
+        }
 
     def _get_earliest_appointment(self) -> dict[str, object] | None:
         appointments: list[tuple[date, dict[str, object]]] = []
