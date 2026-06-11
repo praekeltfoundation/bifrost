@@ -18,9 +18,8 @@ class Migration(migrations.Migration):
                 default=False,
                 help_text=(
                     "Whether Turn has accepted the EDRWeb welcome-message "
-                    "activation trigger for this EDRWeb Patient. Once set, "
-                    "Bifrost does not trigger edrweb_new_user again for this "
-                    "patient."
+                    "activation trigger for the current active EDRWeb "
+                    "messaging phone number."
                 ),
             ),
         ),
