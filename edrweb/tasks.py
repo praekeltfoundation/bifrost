@@ -7,9 +7,10 @@ from typing import Any
 from celery import shared_task
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import F, Max
 from django.utils import timezone as django_timezone
 
+from bifrost.phone_numbers import normalize_phone_number
 from edrweb.api import EDRWebAPIClient
 from edrweb.models import EDRWebPatient
 from lock.models import Lock, LockAcquisitionError
@@ -86,6 +87,7 @@ def sync_appointment_reminder_delta() -> None:
         )
         sync_appointment_reminders_to_turn(lock)
         sync_messaging_contact_activations_to_turn(lock)
+        sync_changed_patient_phone_numbers_to_turn(lock)
     finally:
         lock.release()
 
@@ -137,6 +139,7 @@ def sync_appointment_reminder_full_reconciliation(self: Any) -> None:
         )
         sync_appointment_reminders_to_turn(lock)
         sync_messaging_contact_activations_to_turn(lock)
+        sync_changed_patient_phone_numbers_to_turn(lock)
     finally:
         lock.release()
 
@@ -156,6 +159,7 @@ def _upsert_appointment_reminder_record(record: dict[str, Any]) -> bool:
     appointments = payload.pop("Appointments", [])
     if not isinstance(appointments, list):
         raise ValueError("EDRWeb Appointments field must be a list.")
+    phone_number = normalize_phone_number(phone_number) or ""
 
     existing_patient = (
         EDRWebPatient.objects.select_for_update().filter(patient_id=patient_id).first()
@@ -207,6 +211,8 @@ def sync_appointment_reminders_to_turn(lock: Lock | None = None) -> None:
         return
 
     errors = _get_turn_client().import_contacts(rows)
+    if lock is not None:
+        lock.refresh()
     if errors:
         raise TurnAPIError(
             "Turn returned import errors for "
@@ -248,6 +254,8 @@ def sync_messaging_contact_activations_to_turn(lock: Lock | None = None) -> None
         return
 
     errors = _get_turn_client().import_contacts(rows)
+    if lock is not None:
+        lock.refresh()
     failed_urns: set[str] = set()
     if errors:
         failed_urns = {error.get("urn") or "" for error in errors}
@@ -263,9 +271,94 @@ def sync_messaging_contact_activations_to_turn(lock: Lock | None = None) -> None
     ]
     EDRWebPatient.objects.filter(patient_id__in=updated_patient_ids).update(
         messaging_contact_activated=True,
+        active_messaging_phone_number=F("phone_number"),
     )
 
     logger.info(
         "Imported %s EDRWeb messaging contact activations to Turn.",
         len(rows),
+    )
+
+
+def sync_changed_patient_phone_numbers_to_turn(lock: Lock | None = None) -> None:
+    timestamp = django_timezone.now().isoformat()
+    patients = list(
+        EDRWebPatient.objects.filter(
+            is_active=True,
+            messaging_contact_activated=True,
+        )
+        .exclude(active_messaging_phone_number="")
+        .exclude(active_messaging_phone_number=F("phone_number"))
+        .order_by("pk")
+    )
+    if lock is not None:
+        lock.refresh()
+    if not patients:
+        logger.info("Imported 0 EDRWeb changed patient phone numbers to Turn.")
+        return
+
+    turn_client = _get_turn_client()
+    retirement_errors = turn_client.import_contacts(
+        [
+            {
+                "urn": patient.active_messaging_phone_number,
+                "edrweb_reminders": "False",
+            }
+            for patient in patients
+        ]
+    )
+    if lock is not None:
+        lock.refresh()
+    if retirement_errors:
+        logger.error(
+            "Turn returned retirement import errors for %d EDRWeb changed phone "
+            "number row(s): %s",
+            len(retirement_errors),
+            repr(retirement_errors),
+        )
+
+    failed_retirement_urns = {error.get("urn") or "" for error in retirement_errors}
+    activation_patients = [
+        patient
+        for patient in patients
+        if patient.active_messaging_phone_number not in failed_retirement_urns
+    ]
+    if not activation_patients:
+        logger.info("Imported 0 EDRWeb changed patient phone numbers to Turn.")
+        return
+
+    activation_errors = turn_client.import_contacts(
+        [
+            {
+                "urn": patient.phone_number,
+                "edrweb_new_user": timestamp,
+            }
+            for patient in activation_patients
+        ]
+    )
+    if lock is not None:
+        lock.refresh()
+    if activation_errors:
+        logger.error(
+            "Turn returned activation import errors for %d EDRWeb changed phone "
+            "number row(s): %s",
+            len(activation_errors),
+            repr(activation_errors),
+        )
+
+    failed_activation_urns = {error.get("urn") or "" for error in activation_errors}
+    updated_patient_ids = [
+        patient.patient_id
+        for patient in activation_patients
+        if patient.phone_number not in failed_activation_urns
+    ]
+    EDRWebPatient.objects.filter(
+        patient_id__in=updated_patient_ids,
+    ).update(
+        active_messaging_phone_number=F("phone_number"),
+    )
+
+    logger.info(
+        "Imported %s EDRWeb changed patient phone numbers to Turn.",
+        len(updated_patient_ids),
     )

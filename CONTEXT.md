@@ -45,8 +45,16 @@ The welcome-message transition that makes a **Turn Contact** ready to receive ED
 _Avoid_: opt in, Turn import step, contact setup
 
 **EDRWeb Messaging Contact Activated**:
-A historical state meaning EDRWeb welcome-message activation has already been accepted for an **EDRWeb Patient** and must not be triggered again.
+A historical state meaning EDRWeb welcome-message activation has already been accepted for the current **EDRWeb Active Messaging Contact**.
 _Avoid_: new patient, new user, invite sent
+
+**EDRWeb Active Messaging Contact**:
+The **Turn Contact** that Bifrost last activated for an **EDRWeb Patient**.
+_Avoid_: old phone, current user contact, latest Turn contact
+
+**EDRWeb Messaging Phone Number Change**:
+A change where an **EDRWeb Patient**'s usable phone number resolves to a different **Turn Contact** than the one previously activated for EDRWeb messaging.
+_Avoid_: user phone change, contact change, EDRWeb patient change
 
 **EDRWeb Appointment Reminder Checkpoint**:
 The latest successfully stored EDRWeb `UpdatedAt` timestamp used to start the next **EDRWeb Appointment Reminder Delta Pull**.
@@ -184,9 +192,12 @@ _Avoid_: suppression reason field, latest delivery error
 - **EDRWeb Messaging Contact Activation** happens only after current EDRWeb patient and appointment context has been accepted by messaging
 - **EDRWeb Messaging Contact Activation** is triggered by setting `edrweb_new_user` to an activation timestamp, without directly setting `edrweb_reminders` to true
 - **EDRWeb Messaging Contact Activated** is recorded only after messaging accepts **EDRWeb Messaging Contact Activation**
-- Failed EDRWeb activation rows remain retryable without blocking successfully accepted EDRWeb activation rows
-- A later phone number change for an **EDRWeb Patient** does not clear **EDRWeb Messaging Contact Activated**
-- Re-activating EDRWeb messaging after an EDRWeb phone number change is out of scope until Bifrost tracks the active EDRWeb **Turn Contact**
+- Failed EDRWeb retirement or activation rows remain retryable without blocking successfully accepted EDRWeb activation rows
+- An **EDRWeb Patient** may have at most one **EDRWeb Active Messaging Contact**
+- **EDRWeb Active Messaging Contact** identity is compared using normalized WhatsApp phone number values
+- An **EDRWeb Messaging Phone Number Change** replaces the **EDRWeb Active Messaging Contact**
+- An **EDRWeb Messaging Phone Number Change** retires the previous **EDRWeb Active Messaging Contact** before triggering **EDRWeb Messaging Contact Activation** for the new **Turn Contact**
+- An **EDRWeb Messaging Phone Number Change** requires both old-contact retirement and new-contact activation to be accepted before Bifrost updates the stored **EDRWeb Active Messaging Contact**
 - The **EDRWeb Appointment Reminder Feed** returns only upcoming **EDRWeb Appointment** records for reminder sync
 - A prescription references exactly one **SyNCH Patient Identifier**
 - A **Complete Patient Delta** may include a **Patient** whose own record did not change
@@ -292,4 +303,4 @@ _Avoid_: suppression reason field, latest delivery error
 - setting EDRWeb appointment reminder context could be read as enabling EDRWeb reminders — resolved: reminder enabling happens through a later welcome-message activation, not by directly setting `edrweb_reminders` to true
 - "opt in" for EDRWeb welcome messaging could be read as clinic consent or WhatsApp consent capture — resolved: use **EDRWeb Messaging Contact Activation**
 - "new patient" and "new user" for EDRWeb could be read as upstream patient state — resolved: use **EDRWeb Messaging Contact Activation** for the trigger and **EDRWeb Messaging Contact Activated** for the persisted state
-- EDRWeb phone-number changes could be read as requiring welcome-message reactivation — resolved: current activation state is **EDRWeb Patient**-level, not **Turn Contact**-level
+- EDRWeb phone-number changes could be read as patient-level activation no-ops — resolved: activation state follows the **EDRWeb Active Messaging Contact**

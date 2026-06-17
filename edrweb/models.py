@@ -22,9 +22,9 @@ class EDRWebPatient(models.Model):
         max_length=255,
         blank=True,
         help_text=(
-            "WhatsApp phone number from EDRWeb PhoneNumber, usually in E.164 "
-            "format. Blank means EDRWeb did not provide a phone number; future "
-            "Turn sync cannot send reminders without one."
+            "Stored WhatsApp phone number from EDRWeb PhoneNumber, normalized "
+            "to E.164. Blank means EDRWeb did not provide a usable phone number; "
+            "future Turn sync cannot send reminders without one."
         ),
     )
     updated_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(
@@ -57,8 +57,16 @@ class EDRWebPatient(models.Model):
         default=False,
         help_text=(
             "Whether Turn has accepted the EDRWeb welcome-message activation "
-            "trigger for this EDRWeb Patient. Once set, Bifrost does not "
-            "trigger edrweb_new_user again for this patient."
+            "trigger for the current active EDRWeb messaging phone number."
+        ),
+    )
+    active_messaging_phone_number: models.CharField[str, str] = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=(
+            "Normalized WhatsApp phone number for the Turn contact Bifrost last "
+            "activated for this EDRWeb Patient. Blank means no EDRWeb messaging "
+            "contact activation has completed yet."
         ),
     )
     appointments: models.JSONField[list[Any], list[Any]] = models.JSONField(
@@ -84,19 +92,32 @@ class EDRWebPatient(models.Model):
     def __str__(self) -> str:
         return self.patient_id
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.phone_number = normalize_phone_number(self.phone_number) or ""
+        self.active_messaging_phone_number = (
+            normalize_phone_number(self.active_messaging_phone_number) or ""
+        )
+
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            kwargs["update_fields"] = tuple(
+                set(update_fields) | {"phone_number", "active_messaging_phone_number"}
+            )
+
+        super().save(*args, **kwargs)
+
     def get_turn_sync_row(self) -> dict[str, object] | None:
-        phone_number = normalize_phone_number(self.phone_number)
-        if phone_number is None:
+        if not self.phone_number:
             return None
 
         if not self.is_active:
             return {
-                "urn": phone_number,
+                "urn": self.phone_number,
                 "edrweb_reminders": "False",
             }
 
         row: dict[str, object] = {
-            "urn": phone_number,
+            "urn": self.phone_number,
             "edrweb_patient_id": self.patient_id,
             "edrweb_next_appointment_date": "",
             "edrweb_appointment_facility_name": "",
@@ -126,12 +147,11 @@ class EDRWebPatient(models.Model):
         return row
 
     def get_turn_activation_row(self, timestamp: str) -> dict[str, object] | None:
-        phone_number = normalize_phone_number(self.phone_number)
-        if phone_number is None:
+        if not self.phone_number:
             return None
 
         return {
-            "urn": phone_number,
+            "urn": self.phone_number,
             "edrweb_new_user": timestamp,
         }
 

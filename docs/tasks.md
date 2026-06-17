@@ -64,9 +64,11 @@ the EDRWeb Appointment Reminder Feed.
   while still holding the EDRWeb appointment reminder lock.
 - If the appointment reminder Turn import succeeds, it calls
   `sync_messaging_contact_activations_to_turn` while still holding the same lock.
+- It then calls `sync_changed_patient_phone_numbers_to_turn` while still holding
+  the same lock.
 - If the Turn import fails, the completed local EDRWeb snapshot changes remain
-  committed, EDRWeb messaging contact activation is not attempted, and a later
-  run can retry Turn from the local snapshots.
+  committed, EDRWeb activation and phone-change handling are not attempted, and
+  a later run can retry Turn from the local snapshots.
 - If it cannot get the lock, it logs a warning and does not attempt any API pull.
 
 ## `sync_appointment_reminder_full_reconciliation`
@@ -94,9 +96,11 @@ full reconciliation task for the EDRWeb Appointment Reminder Feed.
   while still holding the EDRWeb appointment reminder lock.
 - If the appointment reminder Turn import succeeds, it calls
   `sync_messaging_contact_activations_to_turn` while still holding the same lock.
+- It then calls `sync_changed_patient_phone_numbers_to_turn` while still holding
+  the same lock.
 - If the Turn import fails, the completed local EDRWeb snapshot changes remain
-  committed, EDRWeb messaging contact activation is not attempted, and a later
-  run can retry Turn from the local snapshots.
+  committed, EDRWeb activation and phone-change handling are not attempted, and
+  a later run can retry Turn from the local snapshots.
 
 ## `sync_appointment_reminders_to_turn`
 
@@ -142,12 +146,40 @@ message has not yet been triggered.
   generated once for the batch.
 - It does not directly set `edrweb_reminders` to `True`; the welcome-message
   activation flow owns reminder enabling.
-- It logs Turn row-level import errors and does not mark those EDRWeb patients
-  as activated.
+- It logs Turn row-level import errors and does not advance those EDRWeb
+  patients' stored active messaging phone number.
 - It updates `messaging_contact_activated` to `True` for all successfully
   imported EDRWeb patients.
-- It does not clear `messaging_contact_activated` when an EDRWeb patient's phone
-  number later changes.
+- It stores the normalized current phone number in `active_messaging_phone_number`
+  for all successfully imported EDRWeb patients.
+
+## `sync_changed_patient_phone_numbers_to_turn`
+
+`edrweb.tasks.sync_changed_patient_phone_numbers_to_turn` handles EDRWeb patients
+whose current phone number differs from the Turn contact Bifrost last activated
+for EDRWeb messaging.
+
+- It runs after `sync_appointment_reminders_to_turn`, so the new Turn contact
+  already has current EDRWeb patient and appointment context before
+  `edrweb_new_user` is set.
+- It filters to active `EDRWebPatient` rows where
+  `messaging_contact_activated` is `True` and `active_messaging_phone_number` is
+  not blank.
+- It uses the stored normalized phone numbers directly, so
+  `active_messaging_phone_number` and `phone_number` are compared in the
+  database without extra normalization.
+- It loads the matching patients in one ordered queryset list, then refreshes
+  the lock before any Turn API work begins.
+- For each changed phone number, it first imports a retirement row for the old
+  Turn contact with `edrweb_reminders` set to `False`.
+- It refreshes the lock after each Turn API call.
+- It imports an `edrweb_new_user` trigger row for the new Turn contact only when
+  the old-contact retirement row succeeded.
+- It uses one `timezone.now().isoformat()` trigger timestamp for the task run.
+- It stores the new active messaging phone number only for EDRWeb patients whose
+  old-contact retirement and new-contact trigger rows both succeeded.
+- Failed rows remain retryable in later sync runs because the stored active
+  messaging phone number is not advanced.
 
 ## `sync_patients`
 

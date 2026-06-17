@@ -94,6 +94,7 @@ class EDRWebPatientAdminForm(forms.ModelForm):
             "updated_at",
             "is_active",
             "messaging_contact_activated",
+            "active_messaging_phone_number",
             "appointments",
         )
 
@@ -119,6 +120,7 @@ class EDRWebPatientAdmin(admin.ModelAdmin):
         "updated_at",
         "is_active",
         "messaging_contact_activated",
+        "active_messaging_phone_number",
         "feed_removed_at",
     )
     search_fields = ("patient_id", "phone_number")

@@ -26,6 +26,7 @@ class EDRWebPatientAdminTests(TestCase):
                 "updated_at",
                 "is_active",
                 "messaging_contact_activated",
+                "active_messaging_phone_number",
                 "feed_removed_at",
             ),
         )
@@ -43,6 +44,7 @@ class EDRWebPatientAdminTests(TestCase):
         self.assertIn("updated_at", form.fields)
         self.assertIn("is_active", form.fields)
         self.assertIn("messaging_contact_activated", form.fields)
+        self.assertIn("active_messaging_phone_number", form.fields)
         self.assertIn("appointments", form.fields)
         self.assertNotIn("feed_removed_at", form.fields)
         self.assertNotIn("payload", form.fields)
@@ -57,6 +59,7 @@ class EDRWebPatientAdminTests(TestCase):
             "is_active",
             "feed_removed_at",
             "messaging_contact_activated",
+            "active_messaging_phone_number",
             "appointments",
             "payload",
         )
@@ -243,6 +246,7 @@ class EDRWebPatientAdminTests(TestCase):
             "messaging_contact_activated": (
                 "on" if patient.messaging_contact_activated else ""
             ),
+            "active_messaging_phone_number": patient.active_messaging_phone_number,
             "appointments": "[]",
         }
         data.update(data_overrides)
@@ -259,6 +263,7 @@ class EDRWebPatientAdminTests(TestCase):
             "updated_at_1": "12:22:00",
             "is_active": "on",
             "messaging_contact_activated": "",
+            "active_messaging_phone_number": "",
             "appointments": "[]",
         }
         data.update(data_overrides)
