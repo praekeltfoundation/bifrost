@@ -200,7 +200,8 @@ class PatientModelTests(TestCase):
 
         appointment = patient.get_tracked_appointment(today=date(2026, 5, 1))
 
-        self.assertIsNotNone(appointment, "Expected a tracked appointment")
+        if appointment is None:
+            self.fail("Expected a tracked appointment")
         self.assertEqual(appointment.date, date(2026, 4, 22))
         self.assertEqual(appointment.prescription, prescription)
         self.assertEqual(appointment.facility, facility)
@@ -259,7 +260,8 @@ class PatientModelTests(TestCase):
 
         appointment = patient.get_tracked_appointment(today=date(2026, 4, 24))
 
-        self.assertIsNotNone(appointment, "Expected a tracked appointment")
+        if appointment is None:
+            self.fail("Expected a tracked appointment")
         self.assertEqual(appointment.date, date(2026, 5, 21))
         self.assertEqual(appointment.prescription, next_prescription)
         self.assertEqual(appointment.facility, next_facility)
@@ -295,7 +297,8 @@ class PatientModelTests(TestCase):
 
         appointment = patient.get_tracked_appointment(today=date(2026, 4, 21))
 
-        self.assertIsNotNone(appointment, "Expected a tracked appointment")
+        if appointment is None:
+            self.fail("Expected a tracked appointment")
         self.assertEqual(appointment.date, date(2026, 5, 1))
         self.assertEqual(appointment.prescription, prescription)
         self.assertEqual(appointment.facility, facility)
@@ -352,7 +355,8 @@ class PatientModelTests(TestCase):
 
         appointment = patient.get_tracked_appointment(today=date(2026, 6, 18))
 
-        self.assertIsNotNone(appointment, "Expected a tracked appointment")
+        if appointment is None:
+            self.fail("Expected a tracked appointment")
         self.assertEqual(appointment.date, date(2026, 7, 15))
         self.assertEqual(appointment.prescription, next_prescription)
         self.assertEqual(appointment.facility, next_facility)
