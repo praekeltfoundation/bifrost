@@ -430,8 +430,8 @@ def sync_appointment_dates_to_turn(lock: Lock | None = None) -> None:
             "synch_appointment_facility_longitude": "",
         }
 
-        if sync_details.upcoming_appointment is not None:
-            appointment = sync_details.upcoming_appointment
+        if sync_details.tracked_appointment is not None:
+            appointment = sync_details.tracked_appointment
             row["synch_next_appointment_date"] = appointment.date.isoformat()
         if sync_details.messaging_facility is not None:
             facility = sync_details.messaging_facility

@@ -50,7 +50,7 @@ class PatientModelTests(TestCase):
 
         self.assertEqual(patient.messaging_phone_number, "+27820000001")
 
-    def test_upcoming_appointment_skips_unusable_facilities_and_breaks_ties_by_recency(
+    def test_tracked_appointment_skips_unusable_facilities_and_breaks_ties_by_recency(
         self,
     ):
         patient = Patient.objects.create(
@@ -113,16 +113,16 @@ class PatientModelTests(TestCase):
             payload={},
         )
 
-        appointment = patient.get_upcoming_appointment(today=date(2026, 4, 21))
+        appointment = patient.get_tracked_appointment(today=date(2026, 4, 21))
 
         self.assertIsNotNone(appointment)
         if appointment is None:
-            self.fail("Expected an upcoming appointment")
+            self.fail("Expected an tracked appointment")
         self.assertEqual(appointment.date, date(2026, 4, 22))
         self.assertEqual(appointment.prescription, chosen_prescription)
         self.assertEqual(appointment.facility, preferred_facility)
 
-    def test_upcoming_appointment_uses_single_facility_query_for_patient(self):
+    def test_tracked_appointment_uses_single_facility_query_for_patient(self):
         patient = Patient.objects.create(
             ccmdd_patient_id="patient-1",
             date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
@@ -163,9 +163,203 @@ class PatientModelTests(TestCase):
             )
 
         with self.assertNumQueries(2):
-            appointment = patient.get_upcoming_appointment(today=date(2026, 4, 21))
+            appointment = patient.get_tracked_appointment(today=date(2026, 4, 21))
 
         self.assertIsNotNone(appointment)
+
+    def test_tracked_appointment_stays_active_until_window_ends(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        facility = Facility.objects.create(
+            ccmdd_facility_id=1,
+            name="Clinic A",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        prescription = Prescription.objects.create(
+            ccmdd_prescription_id="rx-appointment",
+            date_created=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-22"}],
+            payload={},
+        )
+
+        appointment = patient.get_tracked_appointment(today=date(2026, 5, 1))
+
+        if appointment is None:
+            self.fail("Expected a tracked appointment")
+        self.assertEqual(appointment.date, date(2026, 4, 22))
+        self.assertEqual(appointment.prescription, prescription)
+        self.assertEqual(appointment.facility, facility)
+
+    def test_related_prescription_resolves_tracked_appointment_and_tracks_next_date(
+        self,
+    ):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=1,
+            name="Clinic A",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        next_facility = Facility.objects.create(
+            ccmdd_facility_id=2,
+            name="Clinic B",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-previous",
+            date_created=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-22"}],
+            payload={},
+        )
+        next_prescription = Prescription.objects.create(
+            ccmdd_prescription_id="rx-next",
+            date_created=datetime(2026, 4, 23, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 23, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=2,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-05-21"}],
+            payload={},
+        )
+
+        appointment = patient.get_tracked_appointment(today=date(2026, 4, 24))
+
+        if appointment is None:
+            self.fail("Expected a tracked appointment")
+        self.assertEqual(appointment.date, date(2026, 5, 21))
+        self.assertEqual(appointment.prescription, next_prescription)
+        self.assertEqual(appointment.facility, next_facility)
+
+    def test_prescription_does_not_resolve_its_own_tracked_appointment(self):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        facility = Facility.objects.create(
+            ccmdd_facility_id=1,
+            name="Clinic A",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        prescription = Prescription.objects.create(
+            ccmdd_prescription_id="rx-short-return",
+            date_created=datetime(2026, 4, 20, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 20, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-05-01"}],
+            payload={},
+        )
+
+        appointment = patient.get_tracked_appointment(today=date(2026, 4, 21))
+
+        if appointment is None:
+            self.fail("Expected a tracked appointment")
+        self.assertEqual(appointment.date, date(2026, 5, 1))
+        self.assertEqual(appointment.prescription, prescription)
+        self.assertEqual(appointment.facility, facility)
+
+    def test_missed_appointment_is_skipped_for_next_unresolved_appointment(self):
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+        Facility.objects.create(
+            ccmdd_facility_id=1,
+            name="Clinic A",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        next_facility = Facility.objects.create(
+            ccmdd_facility_id=2,
+            name="Clinic B",
+            latitude="",
+            longitude="",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-missed",
+            date_created=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=1,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-04-22"}],
+            payload={},
+        )
+        next_prescription = Prescription.objects.create(
+            ccmdd_prescription_id="rx-next",
+            date_created=datetime(2026, 6, 28, 1, 0, 0, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 6, 28, 1, 0, 0, tzinfo=timezone.utc),
+            facility_id=2,
+            patient_id=patient.ccmdd_patient_id,
+            patient_phone="0820000001",
+            department_id=1,
+            return_dates=[{"return_date": "2026-07-15"}],
+            payload={},
+        )
+
+        appointment = patient.get_tracked_appointment(today=date(2026, 6, 18))
+
+        if appointment is None:
+            self.fail("Expected a tracked appointment")
+        self.assertEqual(appointment.date, date(2026, 7, 15))
+        self.assertEqual(appointment.prescription, next_prescription)
+        self.assertEqual(appointment.facility, next_facility)
 
     def test_turn_sync_details_fall_back_to_latest_usable_facility(
         self,
@@ -204,7 +398,7 @@ class PatientModelTests(TestCase):
             patient_id=patient.ccmdd_patient_id,
             patient_phone="0820000001",
             department_id=1,
-            return_dates=[{"return_date": "2026-04-20"}],
+            return_dates=[{"return_date": "2026-02-20"}],
             payload={},
         )
         Prescription.objects.create(
@@ -222,7 +416,7 @@ class PatientModelTests(TestCase):
         sync_details = patient.get_turn_sync_details(today=date(2026, 4, 21))
 
         self.assertEqual(sync_details.messaging_phone_number, "+27820000002")
-        self.assertIsNone(sync_details.upcoming_appointment)
+        self.assertIsNone(sync_details.tracked_appointment)
         self.assertEqual(sync_details.messaging_facility, latest_facility)
 
     def test_turn_sync_details_fall_back_when_future_date_lacks_usable_facility(
@@ -270,7 +464,7 @@ class PatientModelTests(TestCase):
         sync_details = patient.get_turn_sync_details(today=date(2026, 4, 21))
 
         self.assertEqual(sync_details.messaging_phone_number, "+27820000002")
-        self.assertIsNone(sync_details.upcoming_appointment)
+        self.assertIsNone(sync_details.tracked_appointment)
         self.assertEqual(sync_details.messaging_facility, fallback_facility)
 
 

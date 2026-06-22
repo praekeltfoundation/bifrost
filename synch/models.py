@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from django.contrib.auth.models import User
@@ -21,7 +21,7 @@ def _parse_return_date(value: object) -> date | None:
 
 
 @dataclass(frozen=True)
-class UpcomingAppointment:
+class TrackedAppointment:
     date: date
     prescription: Prescription
     facility: Facility
@@ -30,7 +30,7 @@ class UpcomingAppointment:
 @dataclass(frozen=True)
 class PatientTurnSyncDetails:
     messaging_phone_number: str | None
-    upcoming_appointment: UpcomingAppointment | None
+    tracked_appointment: TrackedAppointment | None
     messaging_facility: Facility | None
 
 
@@ -71,10 +71,10 @@ class Patient(models.Model):
 
         return None
 
-    def get_upcoming_appointment(self, today: date) -> UpcomingAppointment | None:
+    def get_tracked_appointment(self, today: date) -> TrackedAppointment | None:
         prescriptions = list(self.prescriptions)
         facilities_by_id = self._get_facilities_by_id(prescriptions)
-        return self._get_upcoming_appointment_from_prescriptions(
+        return self._get_tracked_appointment_from_prescriptions(
             today,
             prescriptions,
             facilities_by_id,
@@ -83,18 +83,18 @@ class Patient(models.Model):
     def get_turn_sync_details(self, today: date) -> PatientTurnSyncDetails:
         prescriptions = list(self.prescriptions)
         facilities_by_id = self._get_facilities_by_id(prescriptions)
-        upcoming_appointment = self._get_upcoming_appointment_from_prescriptions(
+        tracked_appointment = self._get_tracked_appointment_from_prescriptions(
             today,
             prescriptions,
             facilities_by_id,
         )
         return PatientTurnSyncDetails(
             messaging_phone_number=self.messaging_phone_number,
-            upcoming_appointment=upcoming_appointment,
+            tracked_appointment=tracked_appointment,
             messaging_facility=self._get_messaging_facility_for_turn_sync(
                 prescriptions,
                 facilities_by_id,
-                upcoming_appointment,
+                tracked_appointment,
             ),
         )
 
@@ -112,13 +112,13 @@ class Patient(models.Model):
             for facility in Facility.objects.filter(ccmdd_facility_id__in=facility_ids)
         }
 
-    def _get_upcoming_appointment_from_prescriptions(
+    def _get_tracked_appointment_from_prescriptions(
         self,
         today: date,
         prescriptions: list[Prescription],
         facilities_by_id: dict[int, Facility],
-    ) -> UpcomingAppointment | None:
-        candidates: list[UpcomingAppointment] = []
+    ) -> TrackedAppointment | None:
+        candidates: list[TrackedAppointment] = []
 
         for prescription in prescriptions:
             facility = prescription.get_messaging_facility(
@@ -127,9 +127,16 @@ class Patient(models.Model):
             if facility is None:
                 continue
 
-            for appointment_date in prescription.get_future_return_dates(today):
+            for appointment_date in prescription.get_trackable_return_dates(today):
+                if self._has_related_prescription(
+                    appointment_date=appointment_date,
+                    appointment_prescription=prescription,
+                    prescriptions=prescriptions,
+                ):
+                    continue
+
                 candidates.append(
-                    UpcomingAppointment(
+                    TrackedAppointment(
                         date=appointment_date,
                         prescription=prescription,
                         facility=facility,
@@ -148,14 +155,34 @@ class Patient(models.Model):
             ),
         )
 
+    def _has_related_prescription(
+        self,
+        *,
+        appointment_date: date,
+        appointment_prescription: Prescription,
+        prescriptions: list[Prescription],
+    ) -> bool:
+        window_start = appointment_date - timedelta(weeks=2)
+        window_end = appointment_date + timedelta(weeks=8)
+
+        for prescription in prescriptions:
+            if prescription == appointment_prescription:
+                continue
+
+            prescription_date = prescription.date_created.date()
+            if window_start <= prescription_date <= window_end:
+                return True
+
+        return False
+
     def _get_messaging_facility_for_turn_sync(
         self,
         prescriptions: list[Prescription],
         facilities_by_id: dict[int, Facility],
-        upcoming_appointment: UpcomingAppointment | None,
+        tracked_appointment: TrackedAppointment | None,
     ) -> Facility | None:
-        if upcoming_appointment is not None:
-            return upcoming_appointment.facility
+        if tracked_appointment is not None:
+            return tracked_appointment.facility
 
         for prescription in reversed(prescriptions):
             facility = prescription.get_messaging_facility(
@@ -209,7 +236,7 @@ class Prescription(models.Model):
     def normalized_patient_phone(self) -> str | None:
         return normalize_phone_number(self.patient_phone)
 
-    def get_future_return_dates(self, today: date) -> list[date]:
+    def get_trackable_return_dates(self, today: date) -> list[date]:
         appointment_dates: list[date] = []
 
         for return_date in self.return_dates:
@@ -217,7 +244,10 @@ class Prescription(models.Model):
                 continue
 
             appointment_date = _parse_return_date(return_date.get("return_date"))
-            if appointment_date is None or appointment_date < today:
+            if (
+                appointment_date is None
+                or appointment_date + timedelta(weeks=8) < today
+            ):
                 continue
 
             appointment_dates.append(appointment_date)

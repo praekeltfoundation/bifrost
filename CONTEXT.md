@@ -10,7 +10,7 @@ Shared terms used by both source-system syncs and Turn messaging updates.
 The messaging-system contact identified by a single WhatsApp phone number and controlled through Turn contact fields.
 
 **Facility**:
-A CCMDD service location used in patient messaging; it may come from an appointment-bearing prescription or, when no future appointment exists, from the most recent prescription with a usable facility name. A usable **Facility** has a non-blank name; coordinates are optional.
+A CCMDD service location used in patient messaging; it may come from a **Tracked Appointment** or, when no **Tracked Appointment** exists, from the most recent prescription with a usable facility name. A usable **Facility** has a non-blank name; coordinates are optional.
 
 **Reminder Suppressed**:
 A messaging-side state meaning outbound reminders should not be sent to the patient until messaging is explicitly re-enabled by a human.
@@ -39,16 +39,24 @@ The patient changeset Bifrost expects from SyNCH for each sync window: every **P
 The upstream SyNCH rule that decides which patients appear on the limited patient endpoint based on prescription changes relevant to the integration; Bifrost depends on this filter for feed completeness but does not use it to decide messaging eligibility.
 _Avoid_: local eligibility rule, appointment rule
 
-**Upcoming Appointment**:
-The earliest future-facing appointment date on or after today that belongs to a prescription with a resolvable **Facility** and can be used in patient messaging; ties on date are broken by the most recently created prescription.
+**Tracked Appointment**:
+The appointment date Bifrost keeps active for patient messaging until the **Patient** has a related prescription or the appointment is considered missed.
 _Avoid_: return date, next script date
+
+**Related Prescription**:
+A prescription created for the same **Patient** from two weeks before through eight weeks after an appointment date, inclusive.
+_Avoid_: attendance row, appointment update
+
+**Missed Appointment**:
+A **Tracked Appointment** that has no **Related Prescription** after its related-prescription window ends.
+_Avoid_: abandoned appointment, expired reminder
 
 **Messaging Phone Number**:
 The most recent valid patient phone number available across that **Patient**'s prescriptions and used for all Turn messaging updates.
 _Avoid_: latest prescription phone, raw patient phone
 
 **New-Patient Eligible**:
-A **Patient** who has a usable **Messaging Phone Number** and enough **Facility** context to send the one-time invite, even without an **Upcoming Appointment**.
+A **Patient** who has a usable **Messaging Phone Number** and enough **Facility** context to send the one-time invite, even without a **Tracked Appointment**.
 _Avoid_: unsent invite, new patient
 
 **Invite Sent**:
@@ -72,6 +80,18 @@ A change where a **Patient**'s current **Messaging Phone Number** resolves to a 
 
 - A **Patient** may have many prescriptions and exactly one **SyNCH Patient Identifier**.
 - A prescription references exactly one **SyNCH Patient Identifier**.
+- A **Related Prescription** belongs to exactly one **Patient** and resolves exactly one appointment attendance window.
+- A prescription may both be a **Related Prescription** for an earlier appointment and contain the next **Tracked Appointment** date.
+- A prescription cannot be a **Related Prescription** for an appointment date carried by that same prescription.
+- **Related Prescription** matching uses prescription creation date, not later prescription update date.
+- Prescription creation date is interpreted as the source calendar date stored with the prescription.
+- A **Related Prescription** can resolve an appointment before the appointment date when it is created inside the appointment's two-week pre-appointment window.
+- A **Related Prescription** may resolve every appointment whose related-prescription window contains that prescription's creation date.
+- A **Related Prescription** resolves a **Tracked Appointment** even when it does not contain another appointment date.
+- A **Tracked Appointment** may remain active after its appointment date while still inside its related-prescription window.
+- A **Tracked Appointment** remains active through the final day of its related-prescription window and becomes missed on the next calendar day when no **Related Prescription** exists.
+- A **Missed Appointment** no longer drives patient messaging once another unresolved appointment can be tracked.
+- The earliest unresolved appointment that is not a **Missed Appointment** drives patient messaging, even when that appointment date is in the past.
 - A **Complete Patient Delta** may include a **Patient** whose own row did not change, and must include a **Patient** whose relevant prescription changed.
 - A **Relevant Prescription Filter** may change upstream feed membership without changing Bifrost's local messaging rules.
 - A **Patient** may have at most one current **Messaging Phone Number** and at most one **Active Messaging Contact**.
@@ -79,8 +99,9 @@ A change where a **Patient**'s current **Messaging Phone Number** resolves to a 
 - Bifrost remembers a **Patient**'s **Active Messaging Contact** independently of current prescription data.
 - **Active Messaging Contact** identity is compared using normalized **Messaging Phone Number** values.
 - All Turn messaging updates for a **Patient** use the **Messaging Phone Number**.
-- Turn facility fields may fall back globally to the most recent usable **Facility** when no usable **Upcoming Appointment** exists.
-- An **Upcoming Appointment** belongs to exactly one prescription and must resolve to exactly one usable **Facility**.
+- Turn facility fields may fall back globally to the most recent usable **Facility** when no usable **Tracked Appointment** exists.
+- A **Tracked Appointment** belongs to exactly one prescription and must resolve to exactly one usable **Facility**.
+- A **Tracked Appointment** uses the **Facility** from the prescription that carries its appointment date, not from a **Related Prescription** that resolves it.
 - A **Patient** may become not **New-Patient Eligible** after being **Invite Sent**.
 - An already **Invite Sent** **Patient** may be treated as having their current **Messaging Phone Number** as their **Active Messaging Contact** without new welcome messaging.
 
@@ -299,9 +320,11 @@ Cross-system rules describe shared Turn contacts and boundaries between SyNCH an
 - Use source-specific patient language: **Patient** for SyNCH CCMDD; **EDRWeb Patient** for EDRWeb. Bifrost does not reconcile them because no shared upstream identifier exists.
 - Treat `ccmdd_patient_id` and prescription `patient_id` as the same **SyNCH Patient Identifier**.
 - Keep upstream feed rules separate from local messaging rules: **Relevant Prescription Filter** controls feed membership, not eligibility.
+- Derive attended and missed appointment state from prescriptions, appointment dates, and processing date rather than storing separate appointment status.
 - Use the most recent valid **Messaging Phone Number**. Missing or invalid current phone data is not a **Messaging Phone Number Change**; a replacement **Messaging Phone Number** is required.
 - Treat **Invite Sent** as patient-level history, not current eligibility. After a **Messaging Phone Number Change**, the new **Active Messaging Contact** may still receive welcome messaging.
 - Let welcome messaging re-enable reminders after Bifrost sets the welcome trigger; Bifrost does not directly set reminder consent during activation.
+- Keep using the existing Turn appointment date field for **Tracked Appointment** dates, including past dates inside the related-prescription window.
 - Use **Reminder Suppressed** only for reminder suppression; OTP **Delivery Protection**, **Retired Messaging Contact**, EDRWeb feed removal, and explicit consent withdrawal are separate concepts.
 - Use **Consent Backfill** only for one-off mirroring of existing clinic consent into Turn.
 - OTP delivery is request-scoped: **Turn Contact** recipient, **API Caller** principal, **OTP Recipient Type** business role, unchanged delivery behavior across recipient types.
@@ -312,4 +335,4 @@ Cross-system rules describe shared Turn contacts and boundaries between SyNCH an
 ## Example Dialogue
 
 > **Dev:** "This patient has a return date next week, so should we mark them as new?"
-> **Domain expert:** "A future appointment still drives the appointment date, but invite eligibility is broader: if we have a **Messaging Phone Number** and enough facility context for the invite, they can still be **New-Patient Eligible** even without an **Upcoming Appointment**."
+> **Domain expert:** "A tracked appointment still drives the appointment date, but invite eligibility is broader: if we have a **Messaging Phone Number** and enough facility context for the invite, they can still be **New-Patient Eligible** even without a **Tracked Appointment**."

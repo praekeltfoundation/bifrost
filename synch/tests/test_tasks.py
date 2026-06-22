@@ -1102,7 +1102,7 @@ class SyncNewPatientsToTurnTests(TestCase):
             patient_id=patient.ccmdd_patient_id,
             patient_phone="0820000001",
             department_id=1,
-            return_dates=[{"return_date": "2026-04-20"}],
+            return_dates=[{"return_date": "2026-02-20"}],
             payload={},
         )
         Prescription.objects.create(
@@ -1678,7 +1678,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             logs.output, ["INFO:synch.tasks:Imported 1 appointment updates to Turn."]
         )
 
-    def test_sync_appointment_dates_to_turn_clears_fields_when_no_upcoming_appointment(
+    def test_sync_appointment_dates_to_turn_clears_fields_when_no_tracked_appointment(
         self,
     ):
         patient = Patient.objects.create(
@@ -1753,7 +1753,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             patient_id=patient.ccmdd_patient_id,
             patient_phone="0820000001",
             department_id=1,
-            return_dates=[{"return_date": "2026-04-20"}],
+            return_dates=[{"return_date": "2026-02-20"}],
             payload={},
         )
         Prescription.objects.create(
