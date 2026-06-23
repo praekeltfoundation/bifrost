@@ -12,7 +12,8 @@ from requests import HTTPError, RequestException, Session, Timeout
 REQUEST_TIMEOUT_SECONDS = 30
 OTP_REQUEST_TIMEOUT_SECONDS = 10
 RETRY_LIMIT = 5
-TURN_CONTACTS_CSV_MAX_BYTES = 1024 * 1024
+# We were getting 413 error responses from Turn, so we use 90% of the limit to be safe
+TURN_CONTACTS_CSV_MAX_BYTES = int(1024 * 1024 * 0.9)
 
 RETRYABLE_HTTP_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
