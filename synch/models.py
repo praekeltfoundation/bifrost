@@ -53,43 +53,22 @@ class Patient(models.Model):
     def __str__(self) -> str:
         return self.ccmdd_patient_id
 
-    @property
-    def prescriptions(self) -> models.QuerySet[Prescription]:
-        return Prescription.objects.filter(patient_id=self.ccmdd_patient_id).order_by(
-            "date_created",
-            "pk",
-        )
-
-    @property
-    def messaging_phone_number(self) -> str | None:
-        for prescription in self.prescriptions.order_by("-date_created", "-pk"):
-            normalized_phone_number = normalize_phone_number(
-                prescription.patient_phone,
-            )
-            if normalized_phone_number is not None:
-                return normalized_phone_number
-
-        return None
-
-    def get_tracked_appointment(self, today: date) -> TrackedAppointment | None:
-        prescriptions = list(self.prescriptions)
-        facilities_by_id = self._get_facilities_by_id(prescriptions)
-        return self._get_tracked_appointment_from_prescriptions(
-            today,
-            prescriptions,
-            facilities_by_id,
-        )
-
-    def get_turn_sync_details(self, today: date) -> PatientTurnSyncDetails:
-        prescriptions = list(self.prescriptions)
-        facilities_by_id = self._get_facilities_by_id(prescriptions)
+    def get_turn_sync_details(
+        self,
+        *,
+        today: date,
+        prescriptions: list[Prescription],
+        facilities_by_id: dict[int, Facility],
+    ) -> PatientTurnSyncDetails:
         tracked_appointment = self._get_tracked_appointment_from_prescriptions(
             today,
             prescriptions,
             facilities_by_id,
         )
         return PatientTurnSyncDetails(
-            messaging_phone_number=self.messaging_phone_number,
+            messaging_phone_number=self._get_messaging_phone_number_from_prescriptions(
+                prescriptions,
+            ),
             tracked_appointment=tracked_appointment,
             messaging_facility=self._get_messaging_facility_for_turn_sync(
                 prescriptions,
@@ -98,19 +77,18 @@ class Patient(models.Model):
             ),
         )
 
-    def _get_facilities_by_id(
+    def _get_messaging_phone_number_from_prescriptions(
         self,
         prescriptions: list[Prescription],
-    ) -> dict[int, Facility]:
-        facility_ids = {
-            prescription.facility_id
-            for prescription in prescriptions
-            if prescription.facility_id is not None
-        }
-        return {
-            facility.ccmdd_facility_id: facility
-            for facility in Facility.objects.filter(ccmdd_facility_id__in=facility_ids)
-        }
+    ) -> str | None:
+        for prescription in reversed(prescriptions):
+            normalized_phone_number = normalize_phone_number(
+                prescription.patient_phone,
+            )
+            if normalized_phone_number is not None:
+                return normalized_phone_number
+
+        return None
 
     def _get_tracked_appointment_from_prescriptions(
         self,

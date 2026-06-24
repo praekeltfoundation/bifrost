@@ -25,6 +25,8 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It captures the current prescription `date_updated` watermark before syncing prescriptions.
 - It runs `sync_prescriptions` second with that captured watermark.
 - It runs `sync_patients` third with the same captured prescription watermark.
+- It builds one patient messaging snapshot from local patients, prescriptions,
+  and facilities.
 - It runs `sync_appointment_dates_to_turn` fourth.
 - It runs `sync_new_patients_to_turn` fifth.
 - It runs `sync_changed_patient_phone_numbers_to_turn` sixth.
@@ -256,7 +258,8 @@ into the local database.
 `synch.tasks.sync_new_patients_to_turn` imports the `synch_new_user` contact field into Turn for patients who haven't yet been sent the invite.
 
 - It filters `Patient` records to only those with `invite_sent` as `False`.
-- For each qualifying patient, it resolves a shared patient messaging state from all matching prescriptions.
+- For each qualifying patient, it resolves shared patient messaging state from
+  the preloaded patient messaging snapshot built by `sync_all`.
 - It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
 - It only imports patients that have both a usable messaging phone number and a usable facility.
 - It uses the tracked appointment's facility when an unresolved appointment
@@ -291,7 +294,9 @@ See [SyNCH Appointment Reminder Logic](./synch-appointment-reminders.md) for
 the full appointment and missed-appointment reminder rules.
 
 - It iterates all `Patient` records in the local database.
-- For each patient, it resolves the same shared patient messaging state used by `sync_new_patients_to_turn`.
+- For each patient, it resolves the same shared patient messaging state used by
+  `sync_new_patients_to_turn` from the preloaded patient messaging snapshot
+  built by `sync_all`.
 - It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
 - It skips patients that have no usable messaging phone number.
 - It sends `synch_patient_id` as the raw CCMDD patient identifier for every emitted row.

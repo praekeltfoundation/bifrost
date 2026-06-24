@@ -161,6 +161,9 @@ class Command(BaseCommand):
             self._patch_profiled_step("sync_prescriptions", step_profiles),
             self._patch_profiled_step("sync_patients", step_profiles),
             self._patch_profiled_step(
+                "build_patient_messaging_snapshot", step_profiles
+            ),
+            self._patch_profiled_step(
                 "sync_appointment_dates_to_turn",
                 step_profiles,
             ),
