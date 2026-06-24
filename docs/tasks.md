@@ -29,6 +29,32 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It wraps the sync steps in a database transaction, so a failure in any step rolls back the local database updates made during that run.
 - If it cannot get the top-level lock, it logs a warning and does not attempt any sync or Turn import.
 
+### Benchmarking `sync_all`
+
+Use `benchmark_sync_all` to run `sync_all` against generated benchmark data with
+mocked CCMDD and Turn clients:
+
+```bash
+uv run ./manage.py benchmark_sync_all
+```
+
+The default scale mirrors the latest complete production run captured in
+`sync_all_logs.txt`: 10,731 facilities, 11,161 patients, 11,555 existing
+prescriptions, 25 prescription updates, 10 patient-row updates, 24 new Turn
+patient imports, and 1 phone-number change. The logs had 0 phone-number changes,
+but the benchmark keeps one by default so that path is exercised.
+
+The command deletes previous benchmark-owned rows at start, seeds fresh data,
+runs the real `synch.tasks.sync_all` code path, and prints total runtime plus
+per-step timings. Each step also reports total database query count, total
+database time, and the five slowest query groups by cumulative database time, so
+slow steps can be tied back to repeated query patterns. It leaves benchmark rows
+in place for inspection unless `--cleanup` is passed.
+
+For accurate results, run it against a dedicated local benchmark database. By
+default it refuses to run when non-benchmark `synch` data exists; pass
+`--allow-existing-data` only when mixed data is intentional.
+
 ## `sync_appointment_reminder_delta`
 
 `edrweb.tasks.sync_appointment_reminder_delta` is the scheduled delta task for
