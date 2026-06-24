@@ -83,7 +83,10 @@ class Lock(models.Model):
 
             lock.expires_at = now + lock.ttl
             lock.save(update_fields=["expires_at", "updated_at"])
-            return lock
+            self.expires_at = lock.expires_at
+            self.updated_at = lock.updated_at
+            self.ttl = lock.ttl
+            return self
 
     def release(self):
         with transaction.atomic():
