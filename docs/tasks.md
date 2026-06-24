@@ -1,7 +1,10 @@
 # Tasks
 
-The `synch.tasks` and `edrweb.tasks` modules define the Celery tasks used by
-the synchronization apps.
+The `synch.tasks` and `edrweb.tasks` modules define synchronization work. In
+`synch.tasks`, only `healthcheck` and `sync_all` are Celery tasks; the remaining
+SyNCH sync functions are internal steps called by `sync_all` so they can share
+one top-level lock, one database transaction, and one preloaded patient
+messaging snapshot.
 
 ## `healthcheck`
 
@@ -206,6 +209,12 @@ for EDRWeb messaging.
   old-contact retirement and new-contact trigger rows both succeeded.
 - Failed rows remain retryable in later sync runs because the stored active
   messaging phone number is not advanced.
+
+## Internal SyNCH Steps
+
+The following `synch.tasks` functions are plain Python functions, not Celery
+tasks. They are intentionally run through `sync_all` so local database updates
+and Turn updates are ordered under one transaction.
 
 ## `sync_patients`
 

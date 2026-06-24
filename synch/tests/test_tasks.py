@@ -277,7 +277,7 @@ class SyncPatientsTaskTests(TestCase):
         client.iter_limited_patients.side_effect = [iter([]), iter([])]
 
         with patch("synch.tasks.CCMDDAPIClient", return_value=client):
-            sync_patients.delay(
+            sync_patients(
                 prescription_date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
             )
 
@@ -313,7 +313,7 @@ class SyncPatientsTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_patients.delay(
+            sync_patients(
                 prescription_date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
             )
 
@@ -355,7 +355,7 @@ class SyncPatientsTaskTests(TestCase):
         client.iter_limited_patients.side_effect = [iter([]), iter([])]
 
         with patch("synch.tasks.CCMDDAPIClient", return_value=client):
-            sync_patients.delay(
+            sync_patients(
                 prescription_date_updated=datetime(2016, 4, 28, tzinfo=timezone.utc),
             )
 
@@ -398,7 +398,7 @@ class SyncPatientsTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_patients.delay(
+            sync_patients(
                 prescription_date_updated=datetime(2016, 4, 29, tzinfo=timezone.utc),
             )
 
@@ -445,7 +445,7 @@ class SyncPatientsTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_patients.delay(
+            sync_patients(
                 prescription_date_updated=datetime(
                     2016, 4, 30, 9, 0, 0, tzinfo=timezone.utc
                 ),
@@ -478,7 +478,7 @@ class SyncPrescriptionsTaskTests(TestCase):
         client.iter_limited_prescriptions.return_value = iter([])
 
         with patch("synch.tasks.CCMDDAPIClient", return_value=client):
-            sync_prescriptions.delay(
+            sync_prescriptions(
                 date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
             )
 
@@ -518,7 +518,7 @@ class SyncPrescriptionsTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_prescriptions.delay(
+            sync_prescriptions(
                 date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
             )
 
@@ -570,7 +570,7 @@ class SyncPrescriptionsTaskTests(TestCase):
         client.iter_limited_prescriptions.return_value = iter([])
 
         with patch("synch.tasks.CCMDDAPIClient", return_value=client):
-            sync_prescriptions.delay(
+            sync_prescriptions(
                 date_updated=datetime(
                     2026, 3, 31, 14, 7, 57, 433000, tzinfo=timezone.utc
                 ),
@@ -620,7 +620,7 @@ class SyncPrescriptionsTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_prescriptions.delay(
+            sync_prescriptions(
                 date_updated=datetime(
                     2026, 3, 31, 14, 7, 57, 433000, tzinfo=timezone.utc
                 ),
@@ -684,7 +684,7 @@ class SyncFacilitiesTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_facilities.delay()
+            sync_facilities()
 
         facility = Facility.objects.get()
         self.assertEqual(facility.ccmdd_facility_id, 110533)
@@ -729,7 +729,7 @@ class SyncFacilitiesTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_facilities.delay()
+            sync_facilities()
 
         facility = Facility.objects.get(ccmdd_facility_id=110533)
         self.assertEqual(facility.name, "Addo Clinic")
@@ -783,7 +783,7 @@ class SyncFacilitiesTaskTests(TestCase):
             patch("synch.tasks.CCMDDAPIClient", return_value=client),
             self.assertLogs("synch.tasks", level="INFO") as logs,
         ):
-            sync_facilities.delay()
+            sync_facilities()
 
         updated_facility = Facility.objects.get(ccmdd_facility_id=110533)
         self.assertEqual(updated_facility.name, "Addo Clinic")

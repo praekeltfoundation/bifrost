@@ -85,7 +85,6 @@ def sync_all() -> None:
         lock.release()
 
 
-@shared_task
 def sync_patients(
     lock: Lock | None = None,
     *,
@@ -126,7 +125,6 @@ def sync_patients(
     )
 
 
-@shared_task
 def sync_prescriptions(
     lock: Lock | None = None,
     *,
@@ -179,7 +177,6 @@ def _upsert_patient_record(record: dict[str, Any]) -> None:
     )
 
 
-@shared_task
 def sync_facilities(lock: Lock | None = None) -> None:
     client = _get_client()
 
@@ -227,7 +224,6 @@ def sync_facilities(lock: Lock | None = None) -> None:
     logger.info("Synced %s facilities.", len(facilities))
 
 
-@shared_task
 def sync_new_patients_to_turn(lock: Lock | None = None) -> None:
     new_patients = Patient.objects.filter(invite_sent=False)
 
@@ -305,7 +301,6 @@ def sync_new_patients_to_turn(lock: Lock | None = None) -> None:
     logger.info("Imported %s new patients to Turn.", len(rows))
 
 
-@shared_task
 def sync_changed_patient_phone_numbers_to_turn(lock: Lock | None = None) -> None:
     timestamp = django_timezone.now().isoformat()
     changes: list[PatientPhoneNumberChange] = []
@@ -406,7 +401,6 @@ def sync_changed_patient_phone_numbers_to_turn(lock: Lock | None = None) -> None
     )
 
 
-@shared_task
 def sync_appointment_dates_to_turn(lock: Lock | None = None) -> None:
     today = django_timezone.localdate()
     rows: list[dict[str, object]] = []
