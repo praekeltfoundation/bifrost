@@ -64,6 +64,9 @@ On success:
 - if the lock was updated less than one minute ago, `refresh()` is a no-op
 - otherwise, `expires_at` becomes `timezone.now() + lock.ttl`
 - `updated_at` is updated
+- the in-memory `Lock` instance is updated with the new timestamps, so repeated
+  `refresh()` calls on the same object remain no-ops until the minimum refresh
+  interval passes again
 
 Raises `LockOwnershipError` when another owner has taken over the lock.
 

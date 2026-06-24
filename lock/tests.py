@@ -134,6 +134,29 @@ class LockRefreshTests(TestCase):
         self.assertEqual(refreshed_lock.owner, "worker-1")
         self.assertGreater(refreshed_lock.expires_at, original_expiry)
 
+    def test_refresh_updates_current_instance_after_database_refresh(self):
+        initial_time = timezone.now()
+        refresh_time = initial_time + timedelta(minutes=5)
+        attempted_refresh_time = refresh_time + timedelta(seconds=59)
+
+        with patch("lock.models.timezone.now", return_value=initial_time):
+            lock = Lock.acquire(key="daily-sync", owner="worker-1")
+
+        with patch("lock.models.timezone.now", return_value=refresh_time):
+            lock.refresh()
+
+        self.assertGreater(lock.updated_at, initial_time)
+
+        with (
+            patch("lock.models.timezone.now", return_value=attempted_refresh_time),
+            patch("lock.models.transaction.atomic") as atomic_mock,
+            patch.object(Lock.objects, "select_for_update") as select_for_update_mock,
+        ):
+            lock.refresh()
+
+        atomic_mock.assert_not_called()
+        select_for_update_mock.assert_not_called()
+
     def test_refresh_raises_for_different_owner(self):
         initial_time = timezone.now()
         expired_time = initial_time + Lock.DEFAULT_TTL + timedelta(seconds=1)

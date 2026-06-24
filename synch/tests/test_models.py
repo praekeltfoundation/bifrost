@@ -7,6 +7,29 @@ from django.test import TestCase
 from synch.models import Facility, Patient, Prescription
 
 
+def get_turn_sync_details(patient: Patient, today: date):
+    prescriptions = list(
+        Prescription.objects.filter(patient_id=patient.ccmdd_patient_id).order_by(
+            "date_created",
+            "pk",
+        )
+    )
+    facility_ids = {
+        prescription.facility_id
+        for prescription in prescriptions
+        if prescription.facility_id is not None
+    }
+    facilities_by_id = {
+        facility.ccmdd_facility_id: facility
+        for facility in Facility.objects.filter(ccmdd_facility_id__in=facility_ids)
+    }
+    return patient.get_turn_sync_details(
+        today=today,
+        prescriptions=prescriptions,
+        facilities_by_id=facilities_by_id,
+    )
+
+
 class PatientModelTests(TestCase):
     def test_string_representation_uses_patient_id(self):
         patient = Patient.objects.create(
@@ -48,7 +71,9 @@ class PatientModelTests(TestCase):
             payload={},
         )
 
-        self.assertEqual(patient.messaging_phone_number, "+27820000001")
+        sync_details = get_turn_sync_details(patient, date(2026, 4, 21))
+
+        self.assertEqual(sync_details.messaging_phone_number, "+27820000001")
 
     def test_tracked_appointment_skips_unusable_facilities_and_breaks_ties_by_recency(
         self,
@@ -113,11 +138,12 @@ class PatientModelTests(TestCase):
             payload={},
         )
 
-        appointment = patient.get_tracked_appointment(today=date(2026, 4, 21))
+        sync_details = get_turn_sync_details(patient, date(2026, 4, 21))
 
-        self.assertIsNotNone(appointment)
-        if appointment is None:
+        self.assertIsNotNone(sync_details.tracked_appointment)
+        if sync_details.tracked_appointment is None:
             self.fail("Expected an tracked appointment")
+        appointment = sync_details.tracked_appointment
         self.assertEqual(appointment.date, date(2026, 4, 22))
         self.assertEqual(appointment.prescription, chosen_prescription)
         self.assertEqual(appointment.facility, preferred_facility)
@@ -163,9 +189,9 @@ class PatientModelTests(TestCase):
             )
 
         with self.assertNumQueries(2):
-            appointment = patient.get_tracked_appointment(today=date(2026, 4, 21))
+            sync_details = get_turn_sync_details(patient, date(2026, 4, 21))
 
-        self.assertIsNotNone(appointment)
+        self.assertIsNotNone(sync_details.tracked_appointment)
 
     def test_tracked_appointment_stays_active_until_window_ends(
         self,
@@ -198,7 +224,8 @@ class PatientModelTests(TestCase):
             payload={},
         )
 
-        appointment = patient.get_tracked_appointment(today=date(2026, 5, 1))
+        sync_details = get_turn_sync_details(patient, date(2026, 5, 1))
+        appointment = sync_details.tracked_appointment
 
         if appointment is None:
             self.fail("Expected a tracked appointment")
@@ -258,7 +285,8 @@ class PatientModelTests(TestCase):
             payload={},
         )
 
-        appointment = patient.get_tracked_appointment(today=date(2026, 4, 24))
+        sync_details = get_turn_sync_details(patient, date(2026, 4, 24))
+        appointment = sync_details.tracked_appointment
 
         if appointment is None:
             self.fail("Expected a tracked appointment")
@@ -295,7 +323,8 @@ class PatientModelTests(TestCase):
             payload={},
         )
 
-        appointment = patient.get_tracked_appointment(today=date(2026, 4, 21))
+        sync_details = get_turn_sync_details(patient, date(2026, 4, 21))
+        appointment = sync_details.tracked_appointment
 
         if appointment is None:
             self.fail("Expected a tracked appointment")
@@ -353,7 +382,8 @@ class PatientModelTests(TestCase):
             payload={},
         )
 
-        appointment = patient.get_tracked_appointment(today=date(2026, 6, 18))
+        sync_details = get_turn_sync_details(patient, date(2026, 6, 18))
+        appointment = sync_details.tracked_appointment
 
         if appointment is None:
             self.fail("Expected a tracked appointment")
@@ -413,7 +443,7 @@ class PatientModelTests(TestCase):
             payload={},
         )
 
-        sync_details = patient.get_turn_sync_details(today=date(2026, 4, 21))
+        sync_details = get_turn_sync_details(patient, date(2026, 4, 21))
 
         self.assertEqual(sync_details.messaging_phone_number, "+27820000002")
         self.assertIsNone(sync_details.tracked_appointment)
@@ -461,7 +491,7 @@ class PatientModelTests(TestCase):
             payload={},
         )
 
-        sync_details = patient.get_turn_sync_details(today=date(2026, 4, 21))
+        sync_details = get_turn_sync_details(patient, date(2026, 4, 21))
 
         self.assertEqual(sync_details.messaging_phone_number, "+27820000002")
         self.assertIsNone(sync_details.tracked_appointment)

@@ -1,7 +1,10 @@
 # Tasks
 
-The `synch.tasks` and `edrweb.tasks` modules define the Celery tasks used by
-the synchronization apps.
+The `synch.tasks` and `edrweb.tasks` modules define synchronization work. In
+`synch.tasks`, only `healthcheck` and `sync_all` are Celery tasks; the remaining
+SyNCH sync functions are internal steps called by `sync_all` so they can share
+one top-level lock, one database transaction, and one preloaded patient
+messaging snapshot.
 
 ## `healthcheck`
 
@@ -22,12 +25,40 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It captures the current prescription `date_updated` watermark before syncing prescriptions.
 - It runs `sync_prescriptions` second with that captured watermark.
 - It runs `sync_patients` third with the same captured prescription watermark.
+- It builds one patient messaging snapshot from local patients, prescriptions,
+  and facilities.
 - It runs `sync_appointment_dates_to_turn` fourth.
 - It runs `sync_new_patients_to_turn` fifth.
 - It runs `sync_changed_patient_phone_numbers_to_turn` sixth.
 - It only proceeds to the next step if the previous step completed successfully.
 - It wraps the sync steps in a database transaction, so a failure in any step rolls back the local database updates made during that run.
 - If it cannot get the top-level lock, it logs a warning and does not attempt any sync or Turn import.
+
+### Benchmarking `sync_all`
+
+Use `benchmark_sync_all` to run `sync_all` against generated benchmark data with
+mocked CCMDD and Turn clients:
+
+```bash
+uv run ./manage.py benchmark_sync_all
+```
+
+The default scale mirrors the latest complete production run captured in
+`sync_all_logs.txt`: 10,731 facilities, 11,161 patients, 11,555 existing
+prescriptions, 25 prescription updates, 10 patient-row updates, 24 new Turn
+patient imports, and 1 phone-number change. The logs had 0 phone-number changes,
+but the benchmark keeps one by default so that path is exercised.
+
+The command deletes previous benchmark-owned rows at start, seeds fresh data,
+runs the real `synch.tasks.sync_all` code path, and prints total runtime plus
+per-step timings. Each step also reports total database query count, total
+database time, and the five slowest query groups by cumulative database time, so
+slow steps can be tied back to repeated query patterns. It leaves benchmark rows
+in place for inspection unless `--cleanup` is passed.
+
+For accurate results, run it against a dedicated local benchmark database. By
+default it refuses to run when non-benchmark `synch` data exists; pass
+`--allow-existing-data` only when mixed data is intentional.
 
 ## `sync_appointment_reminder_delta`
 
@@ -181,6 +212,12 @@ for EDRWeb messaging.
 - Failed rows remain retryable in later sync runs because the stored active
   messaging phone number is not advanced.
 
+## Internal SyNCH Steps
+
+The following `synch.tasks` functions are plain Python functions, not Celery
+tasks. They are intentionally run through `sync_all` so local database updates
+and Turn updates are ordered under one transaction.
+
 ## `sync_patients`
 
 `synch.tasks.sync_patients` incrementally synchronizes patients from the CCMDD API into the local database.
@@ -221,7 +258,8 @@ into the local database.
 `synch.tasks.sync_new_patients_to_turn` imports the `synch_new_user` contact field into Turn for patients who haven't yet been sent the invite.
 
 - It filters `Patient` records to only those with `invite_sent` as `False`.
-- For each qualifying patient, it resolves a shared patient messaging state from all matching prescriptions.
+- For each qualifying patient, it resolves shared patient messaging state from
+  the preloaded patient messaging snapshot built by `sync_all`.
 - It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
 - It only imports patients that have both a usable messaging phone number and a usable facility.
 - It uses the tracked appointment's facility when an unresolved appointment
@@ -256,7 +294,9 @@ See [SyNCH Appointment Reminder Logic](./synch-appointment-reminders.md) for
 the full appointment and missed-appointment reminder rules.
 
 - It iterates all `Patient` records in the local database.
-- For each patient, it resolves the same shared patient messaging state used by `sync_new_patients_to_turn`.
+- For each patient, it resolves the same shared patient messaging state used by
+  `sync_new_patients_to_turn` from the preloaded patient messaging snapshot
+  built by `sync_all`.
 - It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
 - It skips patients that have no usable messaging phone number.
 - It sends `synch_patient_id` as the raw CCMDD patient identifier for every emitted row.
