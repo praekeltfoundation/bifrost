@@ -21,6 +21,30 @@ class PatientAdminTests(TestCase):
         )
         self.assertEqual(model_admin.search_fields, ("ccmdd_patient_id",))
 
+    def test_patient_admin_keeps_internal_messaging_state_read_only(self):
+        model_admin = admin.site._registry[Patient]
+        patient = Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 5, 2, tzinfo=timezone.utc),
+            invite_sent=True,
+            active_messaging_phone_number="+27820000001",
+            payload={},
+        )
+        request = RequestFactory().get("/admin/synch/patient/1/change/")
+
+        form = model_admin.get_form(request, obj=patient)(instance=patient)
+
+        self.assertIn("ccmdd_patient_id", form.fields)
+        self.assertIn("date_created", form.fields)
+        self.assertIn("date_updated", form.fields)
+        self.assertNotIn("invite_sent", form.fields)
+        self.assertNotIn("active_messaging_phone_number", form.fields)
+        self.assertNotIn("payload", form.fields)
+        self.assertIn("invite_sent", model_admin.readonly_fields)
+        self.assertIn("active_messaging_phone_number", model_admin.readonly_fields)
+        self.assertIn("payload", model_admin.readonly_fields)
+
 
 class PrescriptionAdminTests(TestCase):
     def test_prescription_model_is_registered_in_admin(self):

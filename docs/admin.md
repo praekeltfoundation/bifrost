@@ -14,6 +14,10 @@ The `synch` app registers the local CCMDD snapshot models.
 
 - Listed fields: `ccmdd_patient_id`, `date_created`, `date_updated`.
 - Search fields: `ccmdd_patient_id`.
+- Editable upstream snapshot fields: `ccmdd_patient_id`, `date_created`, and
+  `date_updated`.
+- Internal messaging state fields `invite_sent` and
+  `active_messaging_phone_number` are task-owned and read-only in admin.
 - `payload` is read-only because it stores residual upstream CCMDD patient
   fields that were not promoted into explicit model columns.
 
@@ -53,18 +57,19 @@ correct local EDRWeb appointment reminder snapshots.
   `feed_removed_at`.
 - Search fields: `patient_id`, `phone_number`.
 - Editable fields: `patient_id`, `phone_number`, `updated_at`, `is_active`,
-  `messaging_contact_activated`, `active_messaging_phone_number`, and
-  `appointments`.
+  and `appointments`.
 - `payload` is read-only because it stores residual upstream EDRWeb fields that
   were not promoted into explicit model columns.
 - `feed_removed_at` is read-only. Deactivating an EDRWeb patient sets it to the
   current Bifrost processing time; reactivating the patient clears it.
 - `phone_number` is stored normalized to E.164 on save.
-- `messaging_contact_activated` records whether Turn has accepted the
+- Internal messaging state fields `messaging_contact_activated` and
+  `active_messaging_phone_number` are task-owned and read-only in admin.
+  `messaging_contact_activated` records whether Turn has accepted the
   `edrweb_new_user` activation trigger for the current active EDRWeb messaging
-  phone number.
-- `active_messaging_phone_number` stores the normalized WhatsApp phone number
-  for the Turn contact Bifrost last activated for this EDRWeb patient.
+  phone number, and `active_messaging_phone_number` stores the normalized
+  WhatsApp phone number for the Turn contact Bifrost last activated for this
+  EDRWeb patient.
 - `updated_at` cannot be set in the future because Bifrost uses the latest
   stored value as the next EDRWeb delta checkpoint.
 - `appointments` must be a JSON list of objects. Each appointment must include

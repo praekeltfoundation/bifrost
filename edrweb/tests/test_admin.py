@@ -43,11 +43,13 @@ class EDRWebPatientAdminTests(TestCase):
         self.assertIn("phone_number", form.fields)
         self.assertIn("updated_at", form.fields)
         self.assertIn("is_active", form.fields)
-        self.assertIn("messaging_contact_activated", form.fields)
-        self.assertIn("active_messaging_phone_number", form.fields)
         self.assertIn("appointments", form.fields)
+        self.assertNotIn("messaging_contact_activated", form.fields)
+        self.assertNotIn("active_messaging_phone_number", form.fields)
         self.assertNotIn("feed_removed_at", form.fields)
         self.assertNotIn("payload", form.fields)
+        self.assertIn("messaging_contact_activated", model_admin.readonly_fields)
+        self.assertIn("active_messaging_phone_number", model_admin.readonly_fields)
         self.assertIn("feed_removed_at", model_admin.readonly_fields)
         self.assertIn("payload", model_admin.readonly_fields)
 
@@ -243,10 +245,6 @@ class EDRWebPatientAdminTests(TestCase):
             "updated_at_0": "2026-05-30",
             "updated_at_1": "12:22:00",
             "is_active": "on" if patient.is_active else "",
-            "messaging_contact_activated": (
-                "on" if patient.messaging_contact_activated else ""
-            ),
-            "active_messaging_phone_number": patient.active_messaging_phone_number,
             "appointments": "[]",
         }
         data.update(data_overrides)
@@ -262,8 +260,6 @@ class EDRWebPatientAdminTests(TestCase):
             "updated_at_0": "2026-05-30",
             "updated_at_1": "12:22:00",
             "is_active": "on",
-            "messaging_contact_activated": "",
-            "active_messaging_phone_number": "",
             "appointments": "[]",
         }
         data.update(data_overrides)
