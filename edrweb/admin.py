@@ -93,8 +93,6 @@ class EDRWebPatientAdminForm(forms.ModelForm):
             "phone_number",
             "updated_at",
             "is_active",
-            "messaging_contact_activated",
-            "active_messaging_phone_number",
             "appointments",
         )
 
@@ -124,7 +122,12 @@ class EDRWebPatientAdmin(admin.ModelAdmin):
         "feed_removed_at",
     )
     search_fields = ("patient_id", "phone_number")
-    readonly_fields = ("feed_removed_at", "payload")
+    readonly_fields = (
+        "messaging_contact_activated",
+        "active_messaging_phone_number",
+        "feed_removed_at",
+        "payload",
+    )
 
     def save_model(
         self,
