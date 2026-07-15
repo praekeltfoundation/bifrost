@@ -235,7 +235,7 @@ Expressing that an **EDRWeb Patient** should no longer receive EDRWeb reminders 
 
 - enables EDRWeb reminders after current EDRWeb patient and appointment context has been configured on the **Turn Contact**
 - happens only after current EDRWeb patient and appointment context has been accepted by messaging
-- is triggered by setting `edrweb_new_user` to an activation timestamp, without directly setting `edrweb_reminders` to true
+- is triggered by setting `edrweb_new_user_timestamp` to an activation timestamp, without directly setting `edrweb_reminders` to true
 
 **EDRWeb Messaging Contact Activated** is recorded only after messaging accepts **EDRWeb Messaging Contact Activation**. Failed EDRWeb retirement or activation rows remain retryable without blocking successfully accepted EDRWeb activation rows.
 

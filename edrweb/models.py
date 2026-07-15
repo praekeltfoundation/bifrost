@@ -152,7 +152,7 @@ class EDRWebPatient(models.Model):
 
         return {
             "urn": self.phone_number,
-            "edrweb_new_user": timestamp,
+            "edrweb_new_user_timestamp": timestamp,
         }
 
     def _get_earliest_appointment(self) -> dict[str, object] | None:

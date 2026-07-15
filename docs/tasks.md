@@ -152,7 +152,7 @@ reminder contact fields in Turn from locally stored `EDRWebPatient` snapshots.
   `Facility` object. `FacilityName`, `Latitude`, and `Longitude` are left blank
   when absent.
 - It does not set `edrweb_reminders` to `True` and does not set
-  `edrweb_new_user`; `sync_messaging_contact_activations_to_turn` owns that
+  `edrweb_new_user_timestamp`; `sync_messaging_contact_activations_to_turn` owns that
   welcome-message trigger.
 - For inactive EDRWeb patients, it sends only `urn` and
   `edrweb_reminders = "False"`, leaving historical EDRWeb context fields intact.
@@ -162,7 +162,7 @@ reminder contact fields in Turn from locally stored `EDRWebPatient` snapshots.
 ## `sync_messaging_contact_activations_to_turn`
 
 `edrweb.tasks.sync_messaging_contact_activations_to_turn` imports the
-`edrweb_new_user` contact field into Turn for EDRWeb patients whose welcome
+`edrweb_new_user_timestamp` contact field into Turn for EDRWeb patients whose welcome
 message has not yet been triggered.
 
 - It runs only after `sync_appointment_reminders_to_turn` succeeds, so the Turn
@@ -173,7 +173,7 @@ message has not yet been triggered.
   assuming South Africa (`ZA`) when no country code is provided.
 - It skips EDRWeb patients whose phone number cannot be normalized.
 - It does not require appointment or facility context.
-- It sets `edrweb_new_user` to a single `timezone.now().isoformat()` value
+- It sets `edrweb_new_user_timestamp` to a single `timezone.now().isoformat()` value
   generated once for the batch.
 - It does not directly set `edrweb_reminders` to `True`; the welcome-message
   activation flow owns reminder enabling.
@@ -192,7 +192,7 @@ for EDRWeb messaging.
 
 - It runs after `sync_appointment_reminders_to_turn`, so the new Turn contact
   already has current EDRWeb patient and appointment context before
-  `edrweb_new_user` is set.
+  `edrweb_new_user_timestamp` is set.
 - It filters to active `EDRWebPatient` rows where
   `messaging_contact_activated` is `True` and `active_messaging_phone_number` is
   not blank.
@@ -204,7 +204,7 @@ for EDRWeb messaging.
 - For each changed phone number, it first imports a retirement row for the old
   Turn contact with `edrweb_reminders` set to `False`.
 - It refreshes the lock after each Turn API call.
-- It imports an `edrweb_new_user` trigger row for the new Turn contact only when
+- It imports an `edrweb_new_user_timestamp` trigger row for the new Turn contact only when
   the old-contact retirement row succeeded.
 - It uses one `timezone.now().isoformat()` trigger timestamp for the task run.
 - It stores the new active messaging phone number only for EDRWeb patients whose

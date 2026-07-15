@@ -331,7 +331,7 @@ def sync_changed_patient_phone_numbers_to_turn(lock: Lock | None = None) -> None
         [
             {
                 "urn": patient.phone_number,
-                "edrweb_new_user": timestamp,
+                "edrweb_new_user_timestamp": timestamp,
             }
             for patient in activation_patients
         ]

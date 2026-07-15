@@ -187,7 +187,7 @@ class SyncAppointmentReminderDeltaTaskTests(TestCase):
                     [
                         {
                             "urn": "+27721234567",
-                            "edrweb_new_user": "2026-06-10T08:09:10+00:00",
+                            "edrweb_new_user_timestamp": "2026-06-10T08:09:10+00:00",
                         }
                     ]
                 ),
@@ -694,7 +694,7 @@ class SyncAppointmentReminderFullReconciliationTaskTests(TestCase):
                     [
                         {
                             "urn": "+27721234567",
-                            "edrweb_new_user": "2026-06-10T08:09:10+00:00",
+                            "edrweb_new_user_timestamp": "2026-06-10T08:09:10+00:00",
                         }
                     ]
                 ),
@@ -882,11 +882,11 @@ class SyncMessagingContactActivationsToTurnTests(TestCase):
             [
                 {
                     "urn": "+27720000001",
-                    "edrweb_new_user": "2026-06-10T08:09:10+00:00",
+                    "edrweb_new_user_timestamp": "2026-06-10T08:09:10+00:00",
                 },
                 {
                     "urn": "+27720000002",
-                    "edrweb_new_user": "2026-06-10T08:09:10+00:00",
+                    "edrweb_new_user_timestamp": "2026-06-10T08:09:10+00:00",
                 },
             ]
         )
@@ -970,7 +970,7 @@ class SyncChangedPatientPhoneNumbersToTurnTests(TestCase):
                     [
                         {
                             "urn": "+27720000002",
-                            "edrweb_new_user": "2026-06-10T08:09:10+00:00",
+                            "edrweb_new_user_timestamp": "2026-06-10T08:09:10+00:00",
                         }
                     ]
                 ),
@@ -1027,7 +1027,7 @@ class SyncChangedPatientPhoneNumbersToTurnTests(TestCase):
         turn_client = Mock()
         turn_client.import_contacts.side_effect = [
             [],
-            [{"urn": "+27720000002", "edrweb_new_user": "ERROR: failed"}],
+            [{"urn": "+27720000002", "edrweb_new_user_timestamp": "ERROR: failed"}],
         ]
         activation_time = datetime(2026, 6, 10, 8, 9, 10, tzinfo=timezone.utc)
 
@@ -1051,7 +1051,7 @@ class SyncChangedPatientPhoneNumbersToTurnTests(TestCase):
                     [
                         {
                             "urn": "+27720000002",
-                            "edrweb_new_user": "2026-06-10T08:09:10+00:00",
+                            "edrweb_new_user_timestamp": "2026-06-10T08:09:10+00:00",
                         }
                     ]
                 ),

@@ -66,7 +66,7 @@ correct local EDRWeb appointment reminder snapshots.
 - Internal messaging state fields `messaging_contact_activated` and
   `active_messaging_phone_number` are task-owned and read-only in admin.
   `messaging_contact_activated` records whether Turn has accepted the
-  `edrweb_new_user` activation trigger for the current active EDRWeb messaging
+  `edrweb_new_user_timestamp` activation trigger for the current active EDRWeb messaging
   phone number, and `active_messaging_phone_number` stores the normalized
   WhatsApp phone number for the Turn contact Bifrost last activated for this
   EDRWeb patient.
