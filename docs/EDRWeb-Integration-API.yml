@@ -1,0 +1,444 @@
+openapi: 3.0.3
+info:
+  title: EDRWeb Integration API
+  description: |-
+    The EDRWeb Integration API provides authorised third-party systems with
+    structured access to EDRWeb data. Access is scoped per provider account.
+
+    This specification covers the Authentication and Appointment Reminders
+    endpoints. Additional endpoints may be added in future versions.
+  contact:
+    name: WAMTech Systems (Pty) Ltd
+    email: edrwebsupport@wamtechsystems.co.za
+  license:
+    name: Copyright 2026 © WAMTech Systems (Pty) Ltd.
+  version: 1.7.0
+
+servers:
+  - url: https://staging.edrweb.net/api
+    description: QA / Staging
+  - url: https://edrweb.net/api
+    description: Production
+
+tags:
+  - name: Authentication
+    description: Obtain and refresh Bearer access tokens.
+  - name: Appointment Reminders
+    description: Read-only feed of consenting patients and their scheduled milestone appointments.
+
+security:
+  - BearerAuth: []
+
+paths:
+
+  /auth/token:
+    post:
+      tags:
+        - Authentication
+      summary: Obtain an access token.
+      description: |-
+        Authenticate with username and password to receive a short-lived JWT access
+        token and a longer-lived opaque refresh token. Supply the access token as a
+        Bearer token on all subsequent requests.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+            example:
+              username: provided_username
+              password: "••••••••"
+      responses:
+        '200':
+          description: Authentication successful.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+              example:
+                AccessToken: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+                Type: Bearer
+                ExpiresAt: "2026-06-02T08:00:00.000+00:00"
+                RefreshToken: dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4...
+                RefreshExpiresAt: "2026-06-09T06:00:00.000+00:00"
+        '400':
+          description: Malformed request body.
+        '401':
+          description: Invalid credentials or account issue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FailedLoginResponse'
+              examples:
+                invalidCredentials:
+                  summary: Wrong username or password
+                  value:
+                    Status: InvalidPassword
+                    Reason: Invalid credentials.
+                accountLocked:
+                  summary: Account locked
+                  value:
+                    Status: AccountLocked
+                    Reason: Account locked. Contact the system manager to re-activate your account.
+        '403':
+          description: Account does not have API access permission.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+
+  /auth/token/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh an access token.
+      description: |-
+        Exchange a valid refresh token for a new access token and refresh token pair.
+        Use this endpoint before the access token expires to maintain a session without
+        re-supplying credentials.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+            example:
+              RefreshToken: dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4...
+      responses:
+        '200':
+          description: Token refreshed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Malformed request body.
+        '401':
+          description: Refresh token invalid or expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FailedLoginResponse'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+
+  /persons/appointment-reminders:
+    get:
+      tags:
+        - Appointment Reminders
+      summary: Get patients eligible for appointment reminders.
+      description: |-
+        Returns a paginated list of DR-TB patients who have explicitly consented to
+        WhatsApp appointment reminders and have an active treatment registration at
+        one of the caller's assigned facilities.
+
+        Each record includes the patient's phone number in E.164 format and a list of
+        scheduled milestone appointment dates. By default only future appointments are
+        returned; set `upcomingOnly=false` to include past dates.
+
+        **Delta sync:** supply `updatedSince` to retrieve only records changed since
+        that timestamp. A record is considered changed when the patient's demographics
+        or consent status changes, or when their appointment calendar is recalculated.
+
+        **Pagination:** the response includes `nextCursor` and `hasMore`. While
+        `hasMore` is `true`, repeat the request with `cursor` set to the value of
+        `nextCursor` from the previous response. Do not interpret or store cursor
+        values — treat them as opaque strings.
+      parameters:
+        - name: updatedSince
+          in: query
+          required: false
+          description: |-
+            ISO-8601 timestamp with timezone offset. When supplied, only patients
+            whose records changed after this point in time are returned. Omit for a
+            full sync (e.g. initial onboarding or recovery after an outage).
+            Example: `2026-06-01T00:00:00+02:00` or `2026-06-01T00:00:00Z`.
+          schema:
+            type: string
+            format: date-time
+          example: "2026-06-01T00:00:00+02:00"
+        - name: cursor
+          in: query
+          required: false
+          description: |-
+            Pagination cursor from the previous response's `nextCursor` field.
+            Omit on the first request. Treat as an opaque string.
+          schema:
+            type: string
+        - name: pageSize
+          in: query
+          required: false
+          description: Number of patient records per page. Minimum 1, maximum 500, default 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: upcomingOnly
+          in: query
+          required: false
+          description: |-
+            When `true` (default), only appointment dates on or after today are
+            returned. Set to `false` to include all milestone dates regardless of
+            whether they have passed.
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Success. May return an empty `Persons` array if no matching records exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentReminderListResponse'
+              examples:
+                withResults:
+                  summary: Single patient, two appointments
+                  value:
+                    Persons:
+                      - PersonId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                        PhoneNumber: "+27721234567"
+                        UpdatedAt: "2026-05-30T14:22:00.000+02:00"
+                        Appointments:
+                          - AppointmentType: "2 Month Follow Up"
+                            AppointmentDate: "2026-06-20"
+                            Facility:
+                              FacilityName: "WC BLUE DOWNS CLINIC"
+                              Latitude: -33.9744
+                              Longitude: 18.7032
+                          - AppointmentType: "End Of Treatment"
+                            AppointmentDate: "2026-07-20"
+                            Facility:
+                              FacilityName: "WC BLUE DOWNS CLINIC"
+                              Latitude: -33.9744
+                              Longitude: 18.7032
+                    NextCursor: "MTIzNDU="
+                    HasMore: true
+                emptyAppointments:
+                  summary: Consenting patient with no upcoming appointments
+                  value:
+                    Persons:
+                      - PersonId: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                        PhoneNumber: "+27831234568"
+                        UpdatedAt: "2026-05-28T09:10:00.000+02:00"
+                        Appointments: []
+                    NextCursor: null
+                    HasMore: false
+                empty:
+                  summary: No results
+                  value:
+                    Persons: []
+                    NextCursor: null
+                    HasMore: false
+        '400':
+          description: Invalid query parameter value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                Message: pageSize must be between 1 and 500.
+        '401':
+          description: Missing or expired access token.
+        '403':
+          description: Authenticated account does not have the APIUSER role.
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+        '503':
+          description: Gateway or upstream service temporarily unavailable. Retry with exponential backoff.
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+
+    Credentials:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          description: API account username as issued by WAMTech Systems.
+        password:
+          type: string
+          description: API account password.
+
+    RefreshRequest:
+      type: object
+      required:
+        - RefreshToken
+      properties:
+        RefreshToken:
+          type: string
+          description: The refresh token received from a previous authentication or refresh response.
+
+    TokenResponse:
+      type: object
+      properties:
+        AccessToken:
+          type: string
+          description: |-
+            JWT Bearer token. Include as `Authorization: Bearer {token}` on all API requests.
+        Type:
+          type: string
+          description: Token type. Always `Bearer`.
+          example: Bearer
+        ExpiresAt:
+          type: string
+          format: date-time
+          description: When the access token expires (ISO-8601 with timezone offset). Refresh before this time.
+          example: "2026-06-02T08:00:00.000+00:00"
+        RefreshToken:
+          type: string
+          description: Opaque refresh token. Use with POST /auth/token/refresh to obtain a new access token.
+        RefreshExpiresAt:
+          type: string
+          format: date-time
+          description: When the refresh token expires. After this point re-authentication with credentials is required.
+          example: "2026-06-09T06:00:00.000+00:00"
+
+    FailedLoginResponse:
+      type: object
+      properties:
+        Status:
+          type: string
+          description: Machine-readable failure reason.
+          enum:
+            - InvalidUsername
+            - InvalidPassword
+            - AccountInactive
+            - AccountLocked
+            - ResetPassword
+            - InvalidPermissions
+            - ContactManager
+        Reason:
+          type: string
+          description: Human-readable description of the failure.
+
+    AppointmentReminderListResponse:
+      type: object
+      description: Null fields are omitted from the response entirely.
+      properties:
+        Persons:
+          type: array
+          description: Patient records in this page.
+          items:
+            $ref: '#/components/schemas/AppointmentReminderPatientDto'
+        NextCursor:
+          type: string
+          description: Opaque cursor for the next page. Omitted from the response when `HasMore` is false.
+        HasMore:
+          type: boolean
+          description: True when additional pages are available. Repeat the request with `cursor=NextCursor`.
+
+    AppointmentReminderPatientDto:
+      type: object
+      description: Null fields are omitted from the response entirely.
+      properties:
+        PersonId:
+          type: string
+          format: uuid
+          description: |-
+            Stable, unique identifier for this patient. Use this value as the upsert
+            key when storing records locally. This identifier is permanent and will not
+            change across syncs.
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        PhoneNumber:
+          type: string
+          description: |-
+            Patient's cellphone number in E.164 format (e.g. +27721234567).
+            Omitted from the response if no cellphone number has been captured for this patient.
+          example: "+27721234567"
+        UpdatedAt:
+          type: string
+          format: date-time
+          description: |-
+            ISO-8601 timestamp of the most recent change to this patient's record or
+            appointment calendar. Use the maximum `UpdatedAt` value across all records
+            in a sync as the `updatedSince` value for the next delta sync request.
+          example: "2026-05-30T14:22:00.000+02:00"
+        Appointments:
+          type: array
+          description: |-
+            Scheduled milestone appointment dates. Ordered ascending by date.
+            An empty array is valid — the patient is consenting and active but
+            all milestones have passed or have not yet been calculated.
+          items:
+            $ref: '#/components/schemas/AppointmentReminderAppointmentDto'
+
+    AppointmentReminderAppointmentDto:
+      type: object
+      properties:
+        AppointmentType:
+          type: string
+          description: |-
+            Human-readable visit type set by the scheduling algorithm.
+            Possible values include: "Baseline 14 Day Follow Up", "14 Day Follow Up",
+            "1 Month Follow Up", "2 Month Follow Up", "3 Month Follow Up",
+            "4 Month Follow Up", "5 Month Follow Up", "6 Month Follow Up",
+            "End Of Treatment".
+          example: "2 Month Follow Up"
+        AppointmentDate:
+          type: string
+          format: date
+          description: Appointment date in yyyy-MM-dd format.
+          example: "2026-06-20"
+        Facility:
+          $ref: '#/components/schemas/AppointmentReminderFacilityDto'
+
+    AppointmentReminderFacilityDto:
+      type: object
+      description: Null fields are omitted from the response entirely.
+      properties:
+        FacilityName:
+          type: string
+          description: DHIS facility name.
+          example: "WC BLUE DOWNS CLINIC"
+        Latitude:
+          type: number
+          format: double
+          description: WGS84 decimal degrees latitude. Omitted if not captured for this facility.
+          example: -33.9744
+        Longitude:
+          type: number
+          format: double
+          description: WGS84 decimal degrees longitude. Omitted if not captured for this facility.
+          example: 18.7032
+
+    MessageResponse:
+      type: object
+      properties:
+        Message:
+          type: string
+
+    MessageDetailResponse:
+      type: object
+      properties:
+        Message:
+          type: string
+        MessageDetail:
+          type: string
