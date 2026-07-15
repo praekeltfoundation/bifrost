@@ -52,7 +52,18 @@ def validate_return_dates(return_dates: object) -> list[dict[str, object]]:
 class PatientAdmin(admin.ModelAdmin):
     list_display = ("ccmdd_patient_id", "date_created", "date_updated")
     search_fields = ("ccmdd_patient_id",)
-    readonly_fields = ("invite_sent", "active_messaging_phone_number", "payload")
+    readonly_fields = (
+        "invite_sent",
+        "active_messaging_phone_number",
+        "turn_appointment_context_urn",
+        "turn_appointment_context_patient_id",
+        "turn_appointment_context_next_appointment_date",
+        "turn_appointment_context_facility_name",
+        "turn_appointment_context_facility_latitude",
+        "turn_appointment_context_facility_longitude",
+        "turn_appointment_context_synced_at",
+        "payload",
+    )
 
 
 @admin.register(Prescription)

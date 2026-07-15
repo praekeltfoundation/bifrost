@@ -289,7 +289,8 @@ into the local database.
 
 ## `sync_appointment_dates_to_turn`
 
-`synch.tasks.sync_appointment_dates_to_turn` refreshes next-appointment contact fields in Turn for every locally synced patient.
+`synch.tasks.sync_appointment_dates_to_turn` synchronises changed next-appointment
+contact fields in Turn for locally synced patients.
 See [SyNCH Appointment Reminder Logic](./synch-appointment-reminders.md) for
 the full appointment and missed-appointment reminder rules.
 
@@ -320,3 +321,9 @@ the full appointment and missed-appointment reminder rules.
   blank.
 - It sends the rows through the Turn CSV contacts import API.
 - It raises an error if Turn reports row-level import errors in the API response.
+- It stores the accepted appointment context locally on each `Patient` and skips
+  rows whose generated context matches that mirror exactly.
+- It updates the local mirror only after the Turn import succeeds; failed imports
+  remain retryable.
+- It does not repair external/manual Turn drift when the local appointment context
+  is unchanged.

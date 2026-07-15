@@ -458,10 +458,13 @@ def sync_appointment_dates_to_turn(
     lock: Lock | None = None,
 ) -> None:
     rows: list[dict[str, object]] = []
+    changed_patients: list[Patient] = []
+    skipped_count = 0
 
     for patient in patient_messaging_snapshot.patients:
         sync_details = patient_messaging_snapshot.get_turn_sync_details(patient)
         if sync_details.messaging_phone_number is None:
+            skipped_count += 1
             logger.info(
                 "Patient %s does not have a messaging phone number, "
                 "skipping Turn appointment sync.",
@@ -469,30 +472,25 @@ def sync_appointment_dates_to_turn(
             )
             continue
 
-        row: dict[str, object] = {
-            "urn": sync_details.messaging_phone_number,
-            "synch_patient_id": patient.ccmdd_patient_id,
-            "synch_next_appointment_date": "",
-            "synch_appointment_facility_name": "",
-            "synch_appointment_facility_latitude": "",
-            "synch_appointment_facility_longitude": "",
-        }
+        current_context = sync_details.get_turn_appointment_context_fields()
+        if all(
+            getattr(patient, field) == value for field, value in current_context.items()
+        ):
+            skipped_count += 1
+            continue
 
-        if sync_details.tracked_appointment is not None:
-            appointment = sync_details.tracked_appointment
-            row["synch_next_appointment_date"] = appointment.date.isoformat()
-        if sync_details.messaging_facility is not None:
-            facility = sync_details.messaging_facility
-            row["synch_appointment_facility_name"] = facility.name
-            row["synch_appointment_facility_latitude"] = facility.latitude
-            row["synch_appointment_facility_longitude"] = facility.longitude
-
-        rows.append(row)
+        rows.append(sync_details.get_turn_appointment_import_row())
+        for field, value in current_context.items():
+            setattr(patient, field, value)
+        changed_patients.append(patient)
         if lock is not None:
             lock.refresh()
 
     if not rows:
-        logger.info("Imported 0 appointment updates to Turn.")
+        logger.info(
+            "Imported 0 appointment updates to Turn (0 changed, %s skipped).",
+            skipped_count,
+        )
         return
 
     errors = _get_turn_client().import_contacts(rows)
@@ -501,4 +499,17 @@ def sync_appointment_dates_to_turn(
             f"Turn returned import errors for {len(errors)} contact row(s): {errors!r}"
         )
 
-    logger.info("Imported %s appointment updates to Turn.", len(rows))
+    synced_at = django_timezone.now()
+    for patient in changed_patients:
+        patient.turn_appointment_context_synced_at = synced_at
+    Patient.objects.bulk_update(
+        changed_patients,
+        [*current_context.keys(), "turn_appointment_context_synced_at"],
+    )
+
+    logger.info(
+        "Imported %s appointment updates to Turn (%s changed, %s skipped).",
+        len(rows),
+        len(rows),
+        skipped_count,
+    )

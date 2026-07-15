@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.contrib.auth.models import User
@@ -20,6 +21,16 @@ def _parse_return_date(value: object) -> date | None:
         return None
 
 
+def _parse_coordinate(value: str) -> Decimal | None:
+    if not value:
+        return None
+
+    try:
+        return Decimal(value)
+    except InvalidOperation:
+        return None
+
+
 @dataclass(frozen=True)
 class TrackedAppointment:
     date: date
@@ -29,9 +40,59 @@ class TrackedAppointment:
 
 @dataclass(frozen=True)
 class PatientTurnSyncDetails:
+    patient_id: str
     messaging_phone_number: str | None
     tracked_appointment: TrackedAppointment | None
     messaging_facility: Facility | None
+
+    def get_turn_appointment_import_row(self) -> dict[str, object]:
+        next_appointment_date = self._get_next_appointment_date()
+        facility_name, facility_latitude, facility_longitude = (
+            self._get_facility_values()
+        )
+        return {
+            "urn": self.messaging_phone_number,
+            "synch_patient_id": self.patient_id,
+            "synch_next_appointment_date": (
+                next_appointment_date.isoformat() if next_appointment_date else ""
+            ),
+            "synch_appointment_facility_name": facility_name,
+            "synch_appointment_facility_latitude": facility_latitude,
+            "synch_appointment_facility_longitude": facility_longitude,
+        }
+
+    def get_turn_appointment_context_fields(self) -> dict[str, object]:
+        facility_name, facility_latitude, facility_longitude = (
+            self._get_facility_values()
+        )
+        return {
+            "turn_appointment_context_urn": self.messaging_phone_number,
+            "turn_appointment_context_patient_id": self.patient_id,
+            "turn_appointment_context_next_appointment_date": (
+                self._get_next_appointment_date()
+            ),
+            "turn_appointment_context_facility_name": facility_name,
+            "turn_appointment_context_facility_latitude": _parse_coordinate(
+                facility_latitude
+            ),
+            "turn_appointment_context_facility_longitude": _parse_coordinate(
+                facility_longitude
+            ),
+        }
+
+    def _get_next_appointment_date(self) -> date | None:
+        if self.tracked_appointment is None:
+            return None
+        return self.tracked_appointment.date
+
+    def _get_facility_values(self) -> tuple[str, str, str]:
+        if self.messaging_facility is None:
+            return "", "", ""
+        return (
+            self.messaging_facility.name,
+            self.messaging_facility.latitude,
+            self.messaging_facility.longitude,
+        )
 
 
 class Patient(models.Model):
@@ -46,6 +107,38 @@ class Patient(models.Model):
         max_length=255,
         blank=True,
     )
+    turn_appointment_context_urn: models.CharField[str, str] = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+    turn_appointment_context_patient_id: models.CharField[str, str] = models.CharField(
+        max_length=255, blank=True
+    )
+    turn_appointment_context_next_appointment_date: models.DateField[
+        date | None, date | None
+    ] = models.DateField(null=True, blank=True)
+    turn_appointment_context_facility_name: models.CharField[str, str] = (
+        models.CharField(max_length=255, blank=True)
+    )
+    turn_appointment_context_facility_latitude: models.DecimalField[
+        Decimal | None, Decimal | None
+    ] = models.DecimalField(
+        max_digits=10,
+        decimal_places=7,
+        null=True,
+        blank=True,
+    )
+    turn_appointment_context_facility_longitude: models.DecimalField[
+        Decimal | None, Decimal | None
+    ] = models.DecimalField(
+        max_digits=10,
+        decimal_places=7,
+        null=True,
+        blank=True,
+    )
+    turn_appointment_context_synced_at: models.DateTimeField[
+        datetime | None, datetime | None
+    ] = models.DateTimeField(null=True, blank=True)
     payload: models.JSONField[dict[str, Any], dict[str, Any]] = models.JSONField(
         default=dict
     )
@@ -66,6 +159,7 @@ class Patient(models.Model):
             facilities_by_id,
         )
         return PatientTurnSyncDetails(
+            patient_id=self.ccmdd_patient_id,
             messaging_phone_number=self._get_messaging_phone_number_from_prescriptions(
                 prescriptions,
             ),

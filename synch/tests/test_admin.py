@@ -43,6 +43,24 @@ class PatientAdminTests(TestCase):
         self.assertNotIn("payload", form.fields)
         self.assertIn("invite_sent", model_admin.readonly_fields)
         self.assertIn("active_messaging_phone_number", model_admin.readonly_fields)
+        self.assertIn("turn_appointment_context_urn", model_admin.readonly_fields)
+        self.assertIn(
+            "turn_appointment_context_patient_id", model_admin.readonly_fields
+        )
+        self.assertIn(
+            "turn_appointment_context_next_appointment_date",
+            model_admin.readonly_fields,
+        )
+        self.assertIn(
+            "turn_appointment_context_facility_name", model_admin.readonly_fields
+        )
+        self.assertIn(
+            "turn_appointment_context_facility_latitude", model_admin.readonly_fields
+        )
+        self.assertIn(
+            "turn_appointment_context_facility_longitude", model_admin.readonly_fields
+        )
+        self.assertIn("turn_appointment_context_synced_at", model_admin.readonly_fields)
         self.assertIn("payload", model_admin.readonly_fields)
 
 
