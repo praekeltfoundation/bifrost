@@ -1754,6 +1754,32 @@ class SyncAppointmentDatesToTurnTests(TestCase):
 
         turn_client.import_contacts.assert_called_once()
 
+        Prescription.objects.filter(ccmdd_prescription_id="rx-1").update(
+            return_dates=[{"return_date": "2026-04-23"}]
+        )
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+        ):
+            sync_appointment_dates_to_turn()
+
+        self.assertEqual(turn_client.import_contacts.call_count, 2)
+        turn_client.import_contacts.assert_called_with(
+            [
+                {
+                    "urn": "+27820000001",
+                    "synch_patient_id": "patient-1",
+                    "synch_next_appointment_date": "2026-04-23",
+                    "synch_appointment_facility_name": "Clinic A",
+                    "synch_appointment_facility_latitude": "-26.2041",
+                    "synch_appointment_facility_longitude": "28.0473",
+                }
+            ]
+        )
+
     def test_sync_appointment_dates_to_turn_imports_next_future_appointment(
         self,
     ):
