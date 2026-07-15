@@ -1734,11 +1734,51 @@ class SyncAppointmentDatesToTurnTests(TestCase):
                 "synch.tasks.django_timezone.localdate",
                 return_value=datetime(2026, 4, 21).date(),
             ),
-            self.assertNumQueries(3),
+            self.assertNumQueries(4),
         ):
             sync_appointment_dates_to_turn()
 
         self.assertEqual(len(turn_client.import_contacts.call_args.args[0]), 3)
+        synced_patient = Patient.objects.get(ccmdd_patient_id="patient-0")
+        self.assertEqual(synced_patient.turn_appointment_context_urn, "+27820000000")
+        self.assertIsNotNone(synced_patient.turn_appointment_context_synced_at)
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+        ):
+            sync_appointment_dates_to_turn()
+
+        turn_client.import_contacts.assert_called_once()
+
+        Prescription.objects.filter(ccmdd_prescription_id="rx-1").update(
+            return_dates=[{"return_date": "2026-04-23"}]
+        )
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+        ):
+            sync_appointment_dates_to_turn()
+
+        self.assertEqual(turn_client.import_contacts.call_count, 2)
+        turn_client.import_contacts.assert_called_with(
+            [
+                {
+                    "urn": "+27820000001",
+                    "synch_patient_id": "patient-1",
+                    "synch_next_appointment_date": "2026-04-23",
+                    "synch_appointment_facility_name": "Clinic A",
+                    "synch_appointment_facility_latitude": "-26.2041",
+                    "synch_appointment_facility_longitude": "28.0473",
+                }
+            ]
+        )
 
     def test_sync_appointment_dates_to_turn_imports_next_future_appointment(
         self,
@@ -1813,7 +1853,11 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             ]
         )
         self.assertEqual(
-            logs.output, ["INFO:synch.tasks:Imported 1 appointment updates to Turn."]
+            logs.output,
+            [
+                "INFO:synch.tasks:Imported 1 appointment updates to Turn "
+                "(1 changed, 0 skipped)."
+            ],
         )
 
     def test_sync_appointment_dates_to_turn_clears_fields_when_no_tracked_appointment(
@@ -2035,7 +2079,8 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             [
                 "INFO:synch.tasks:Patient patient-bad-phone does not have a "
                 "messaging phone number, skipping Turn appointment sync.",
-                "INFO:synch.tasks:Imported 0 appointment updates to Turn.",
+                "INFO:synch.tasks:Imported 0 appointment updates to Turn "
+                "(0 changed, 1 skipped).",
             ],
         )
 
