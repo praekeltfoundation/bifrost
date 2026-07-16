@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from re import sub
 from time import sleep
 from typing import Any
 from urllib.parse import urljoin
@@ -15,6 +16,11 @@ RETRY_LIMIT = 5
 RETRY_DELAYS_SECONDS = (30.0, 60.0, 120.0, 240.0)
 RETRYABLE_HTTP_STATUS_CODES = {429, 500, 503}
 TOKEN_EXPIRY_BUFFER = timedelta(seconds=60)
+
+
+def _parse_edrweb_datetime(value: str) -> datetime:
+    value = sub(r"(\.\d{6})\d+(?=(?:[+-]\d{2}:\d{2}|Z)?$)", r"\1", value)
+    return datetime.fromisoformat(value)
 
 
 class EDRWebAPIError(Exception):
@@ -272,8 +278,8 @@ class EDRWebAPIClient:
         return EDRWebToken(
             access_token=access_token,
             refresh_token=refresh_token,
-            expires_at=datetime.fromisoformat(expires_at),
-            refresh_expires_at=datetime.fromisoformat(refresh_expires_at),
+            expires_at=_parse_edrweb_datetime(expires_at),
+            refresh_expires_at=_parse_edrweb_datetime(refresh_expires_at),
         )
 
     def _url(self, path: str) -> str:

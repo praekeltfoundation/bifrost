@@ -61,6 +61,28 @@ class EDRWebAPIClientTests(SimpleTestCase):
             )
         return response
 
+    def test_parse_token_response_accepts_seven_fractional_second_digits(self):
+        client = self.make_client()
+
+        token = client._parse_token_response(
+            {
+                "Type": "Bearer",
+                "AccessToken": "access-token",
+                "ExpiresAt": "2026-07-16T13:43:20.1349713+00:00",
+                "RefreshToken": "refresh-token",
+                "RefreshTokenExpiresAt": "2026-07-23T13:13:20.1356667+00:00",
+            }
+        )
+
+        self.assertEqual(
+            token.expires_at,
+            datetime(2026, 7, 16, 13, 43, 20, 134971, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            token.refresh_expires_at,
+            datetime(2026, 7, 23, 13, 13, 20, 135666, tzinfo=timezone.utc),
+        )
+
     def test_iter_appointment_reminder_records_authenticates_and_flattens_pages(self):
         session = Mock()
         session.request.side_effect = [
