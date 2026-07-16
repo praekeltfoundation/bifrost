@@ -263,7 +263,7 @@ class EDRWebAPIClient:
             access_token = payload["AccessToken"]
             refresh_token = payload["RefreshToken"]
             expires_at = payload["ExpiresAt"]
-            refresh_expires_at = payload["RefreshExpiresAt"]
+            refresh_expires_at = payload["RefreshTokenExpiresAt"]
         except KeyError as exc:
             raise EDRWebAPIError(
                 f"EDRWeb token response missing field {exc.args[0]}."
