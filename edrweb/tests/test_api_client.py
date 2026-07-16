@@ -61,6 +61,28 @@ class EDRWebAPIClientTests(SimpleTestCase):
             )
         return response
 
+    def test_parse_token_response_accepts_seven_fractional_second_digits(self):
+        client = self.make_client()
+
+        token = client._parse_token_response(
+            {
+                "Type": "Bearer",
+                "AccessToken": "access-token",
+                "ExpiresAt": "2026-07-16T13:43:20.1349713+00:00",
+                "RefreshToken": "refresh-token",
+                "RefreshTokenExpiresAt": "2026-07-23T13:13:20.1356667+00:00",
+            }
+        )
+
+        self.assertEqual(
+            token.expires_at,
+            datetime(2026, 7, 16, 13, 43, 20, 134971, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            token.refresh_expires_at,
+            datetime(2026, 7, 23, 13, 13, 20, 135666, tzinfo=timezone.utc),
+        )
+
     def test_iter_appointment_reminder_records_authenticates_and_flattens_pages(self):
         session = Mock()
         session.request.side_effect = [
@@ -70,7 +92,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(
@@ -131,7 +153,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(payload={"HasMore": False}),
@@ -162,7 +184,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(
@@ -209,7 +231,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(status_code=503, headers={"Retry-After": "45"}),
@@ -238,7 +260,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(status_code=401),
@@ -248,7 +270,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T09:00:00.000+00:00",
                     "RefreshToken": "new-refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T07:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T07:00:00.000+00:00",
                 }
             ),
             self.make_response(
@@ -286,7 +308,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "2026-06-01T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(
@@ -295,7 +317,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T09:00:00.000+00:00",
                     "RefreshToken": "new-refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T07:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T07:00:00.000+00:00",
                 }
             ),
             self.make_response(
@@ -332,7 +354,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "2026-06-01T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(status_code=401),
@@ -342,7 +364,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T09:00:00.000+00:00",
                     "RefreshToken": "new-refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T07:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T07:00:00.000+00:00",
                 }
             ),
             self.make_response(
@@ -382,7 +404,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "2026-06-01T08:00:30.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "2026-06-01T08:00:30.000+00:00",
+                    "RefreshTokenExpiresAt": "2026-06-01T08:00:30.000+00:00",
                 }
             ),
             self.make_response(
@@ -391,7 +413,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T09:00:00.000+00:00",
                     "RefreshToken": "new-refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T07:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T07:00:00.000+00:00",
                 }
             ),
             self.make_response(
@@ -433,7 +455,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
 
         with self.assertRaisesMessage(
             EDRWebAPIError,
-            "EDRWeb token response missing field RefreshExpiresAt.",
+            "EDRWeb token response missing field RefreshTokenExpiresAt.",
         ):
             list(client.iter_appointment_reminder_records())
 
@@ -446,7 +468,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             *[self.make_response(status_code=500) for _ in range(5)],
@@ -472,7 +494,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(
@@ -504,7 +526,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(payload={"HasMore": False}),
@@ -524,7 +546,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(payload={"Persons": {}, "HasMore": False}),
@@ -551,7 +573,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                             "Type": "Bearer",
                             "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                             "RefreshToken": "refresh-token",
-                            "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                            "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                         }
                     ),
                     self.make_response(payload=payload),
@@ -577,7 +599,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                             "Type": "Bearer",
                             "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                             "RefreshToken": "refresh-token",
-                            "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                            "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                         }
                     ),
                     self.make_response(status_code=status_code),
@@ -603,7 +625,7 @@ class EDRWebAPIClientTests(SimpleTestCase):
                     "Type": "Bearer",
                     "ExpiresAt": "9999-06-02T08:00:00.000+00:00",
                     "RefreshToken": "refresh-token",
-                    "RefreshExpiresAt": "9999-06-09T06:00:00.000+00:00",
+                    "RefreshTokenExpiresAt": "9999-06-09T06:00:00.000+00:00",
                 }
             ),
             self.make_response(
