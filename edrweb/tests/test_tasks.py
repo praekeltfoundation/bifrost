@@ -146,6 +146,34 @@ class SyncAppointmentReminderDeltaTaskTests(TestCase):
             ],
         )
 
+    def test_accepts_updated_at_with_two_fractional_second_digits(self):
+        client = Mock()
+        client.iter_appointment_reminder_records.return_value = iter(
+            [
+                {
+                    "PersonId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    "PhoneNumber": "+27721234567",
+                    "UpdatedAt": "2026-07-21T17:45:41.63+02:00",
+                    "Appointments": [],
+                }
+            ]
+        )
+
+        with (
+            patch("edrweb.tasks.EDRWebAPIClient", return_value=client),
+            patch(
+                "edrweb.tasks.TurnAPIClient",
+                return_value=make_successful_turn_client(),
+            ),
+        ):
+            sync_appointment_reminder_delta.delay()
+
+        patient = EDRWebPatient.objects.get()
+        self.assertEqual(
+            patient.updated_at,
+            datetime(2026, 7, 21, 15, 45, 41, 630000, tzinfo=timezone.utc),
+        )
+
     def test_delta_triggers_messaging_contact_activation_after_context_import(self):
         client = Mock()
         client.iter_appointment_reminder_records.return_value = iter(

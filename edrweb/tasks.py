@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from celery import shared_task
@@ -11,7 +11,7 @@ from django.db.models import F, Max
 from django.utils import timezone as django_timezone
 
 from bifrost.phone_numbers import normalize_phone_number
-from edrweb.api import EDRWebAPIClient
+from edrweb.api import EDRWebAPIClient, _parse_edrweb_datetime
 from edrweb.models import EDRWebPatient
 from lock.models import Lock, LockAcquisitionError
 from synch.turn import TurnAPIClient, TurnAPIError
@@ -153,7 +153,7 @@ def _upsert_appointment_reminder_record(record: dict[str, Any]) -> bool:
     updated_at_value = payload.pop("UpdatedAt", None)
     if not isinstance(updated_at_value, str) or not updated_at_value:
         raise ValueError("EDRWeb UpdatedAt field is required.")
-    updated_at = datetime.fromisoformat(updated_at_value)
+    updated_at = _parse_edrweb_datetime(updated_at_value)
     if updated_at.utcoffset() is None:
         raise ValueError("EDRWeb UpdatedAt field must include a timezone offset.")
     appointments = payload.pop("Appointments", [])
