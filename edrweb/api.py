@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from re import sub
 from time import sleep
 from typing import Any
 from urllib.parse import urljoin
 
+from django.utils.dateparse import parse_datetime
 from requests import HTTPError, RequestException, Response, Session
 
 REQUEST_TIMEOUT_SECONDS = 60
@@ -19,8 +19,10 @@ TOKEN_EXPIRY_BUFFER = timedelta(seconds=60)
 
 
 def _parse_edrweb_datetime(value: str) -> datetime:
-    value = sub(r"(\.\d{6})\d+(?=(?:[+-]\d{2}:\d{2}|Z)?$)", r"\1", value)
-    return datetime.fromisoformat(value)
+    parsed = parse_datetime(value)
+    if parsed is None:
+        raise ValueError(f"Invalid EDRWeb datetime: {value!r}")
+    return parsed
 
 
 class EDRWebAPIError(Exception):
