@@ -162,6 +162,9 @@ def sync_prescriptions(
         patient_id = record.pop("patient_id")
         patient_phone = record.pop("patient_phone", "")
         department_id = record.pop("department_id", None)
+        version = record.pop("version", None)
+        if isinstance(version, str) and not version.strip():
+            version = None
         return_dates = record.pop("return_dates", [])
         Prescription.objects.update_or_create(
             ccmdd_prescription_id=prescription_id,
@@ -172,6 +175,7 @@ def sync_prescriptions(
                 "patient_id": patient_id,
                 "patient_phone": patient_phone,
                 "department_id": department_id,
+                "version": version,
                 "return_dates": return_dates,
                 "payload": record,
             },

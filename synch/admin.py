@@ -58,6 +58,7 @@ class PatientAdmin(admin.ModelAdmin):
         "turn_appointment_context_urn",
         "turn_appointment_context_patient_id",
         "turn_appointment_context_next_appointment_date",
+        "turn_appointment_context_appointment_type",
         "turn_appointment_context_facility_name",
         "turn_appointment_context_facility_latitude",
         "turn_appointment_context_facility_longitude",

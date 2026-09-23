@@ -8,6 +8,82 @@ from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
 
+class PrescriptionVersionMigrationTests(TransactionTestCase):
+    migrate_from: ClassVar[list[tuple[str, str]]] = [
+        ("synch", "0010_patient_turn_appointment_context_appointment_type_and_more")
+    ]
+    migrate_to: ClassVar[list[tuple[str, str]]] = [
+        ("synch", "0011_backfill_prescription_version")
+    ]
+
+    def test_backfills_prescription_version_and_removes_it_from_payload(self):
+        executor = MigrationExecutor(connection)
+        leaf_targets = executor.loader.graph.leaf_nodes()
+        migrate_from = self._replace_synch_target(leaf_targets, self.migrate_from[0])
+        migrate_to = self._replace_synch_target(leaf_targets, self.migrate_to[0])
+
+        try:
+            executor.migrate(migrate_from)
+            old_apps = executor.loader.project_state(migrate_from).apps
+            Prescription = old_apps.get_model("synch", "Prescription")
+
+            for prescription_id, payload in (
+                ("legacy-icc", {"version": 0, "status": "active"}),
+                ("legacy-unknown", {"version": 42, "status": "active"}),
+                ("legacy-blank", {"version": "", "status": "active"}),
+                ("legacy-null", {"version": None, "status": "active"}),
+                ("without-version", {"status": "active"}),
+            ):
+                Prescription.objects.create(
+                    ccmdd_prescription_id=prescription_id,
+                    date_created=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+                    date_updated=datetime(2026, 4, 1, 1, 0, 0, tzinfo=timezone.utc),
+                    facility_id=1,
+                    patient_id="patient-1",
+                    patient_phone="0820000001",
+                    department_id=1,
+                    return_dates=[],
+                    payload=payload,
+                )
+
+            executor = MigrationExecutor(connection)
+            executor.migrate(migrate_to)
+            new_apps = executor.loader.project_state(migrate_to).apps
+            MigratedPrescription = new_apps.get_model("synch", "Prescription")
+
+            self.assertEqual(
+                MigratedPrescription.objects.get(
+                    ccmdd_prescription_id="legacy-icc"
+                ).version,
+                0,
+            )
+            self.assertEqual(
+                MigratedPrescription.objects.get(
+                    ccmdd_prescription_id="legacy-unknown"
+                ).version,
+                42,
+            )
+            for prescription_id in ("legacy-blank", "legacy-null", "without-version"):
+                self.assertIsNone(
+                    MigratedPrescription.objects.get(
+                        ccmdd_prescription_id=prescription_id
+                    ).version
+                )
+
+            for prescription in MigratedPrescription.objects.all():
+                self.assertEqual(prescription.payload, {"status": "active"})
+        finally:
+            executor = MigrationExecutor(connection)
+            executor.migrate(leaf_targets)
+
+    def _replace_synch_target(
+        self,
+        targets: list[tuple[str, str]],
+        synch_target: tuple[str, str],
+    ) -> list[tuple[str, str]]:
+        return [target if target[0] != "synch" else synch_target for target in targets]
+
+
 class PatientActiveMessagingPhoneNumberMigrationTests(TransactionTestCase):
     migrate_from: ClassVar[list[tuple[str, str]]] = [
         ("synch", "0007_create_otp_delivery_throttle_cache")

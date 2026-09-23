@@ -238,7 +238,8 @@ and Turn updates are ordered under one transaction.
 - It receives the pre-run prescription `date_updated` watermark from `sync_all`.
 - It calls `iter_limited_prescriptions(date_updated=...)` with that captured watermark to fetch the exact prescription window that the paired patient refresh will also use.
 - For each returned prescription, it stores `id`, `date_created`, `date_updated`, `facility_id`, `patient_id`, `patient_phone`, `department_id`, and `return_dates` in explicit model fields.
-- It stores every remaining CCMDD prescription field in the `Prescription.payload` JSON column.
+- It stores the upstream prescription `version` in the nullable `Prescription.version` field instead of `Prescription.payload`; blank or missing values are stored as `NULL`, and integer values are not range-restricted.
+- It stores every other remaining CCMDD prescription field in the `Prescription.payload` JSON column.
 - If a prescription already exists, it is updated instead of a new one being created.
 
 ## `sync_facilities`
@@ -301,6 +302,8 @@ the full appointment and missed-appointment reminder rules.
 - It uses the most recent valid prescription `patient_phone` as the Turn `urn`, normalized to E.164 with `phonenumbers` and assuming South Africa (`ZA`) when no country code is provided.
 - It skips patients that have no usable messaging phone number.
 - It sends `synch_patient_id` as the raw CCMDD patient identifier for every emitted row.
+- It maps the selected tracked appointment prescription's `version` to `synch_appointment_type`: version `0` becomes `ICC`, version `3` becomes `CCMDD`, and all other or missing values become blank.
+- When no tracked appointment exists, it sends a blank `synch_appointment_type`, including when facility fields come from the fallback prescription.
 - It flattens `return_dates` across all of the patient's prescriptions,
   discards appointments whose facility is missing or unnamed, discards
   appointments resolved by a related prescription, discards missed
