@@ -540,6 +540,7 @@ class SyncPrescriptionsTaskTests(TestCase):
                     "patient_id": "D905C1E4-1962-E711-9D8C-7C5CF8BA146D",
                     "patient_phone": "1231231233",
                     "department_id": 123,
+                    "version": 3,
                     "return_dates": [
                         {
                             "return_date": "2026-04-28",
@@ -574,6 +575,7 @@ class SyncPrescriptionsTaskTests(TestCase):
         )
         self.assertEqual(prescription.patient_phone, "1231231233")
         self.assertEqual(prescription.department_id, 123)
+        self.assertEqual(prescription.version, 3)
         self.assertEqual(
             prescription.return_dates,
             [
@@ -603,6 +605,7 @@ class SyncPrescriptionsTaskTests(TestCase):
             patient_id="existing-patient",
             patient_phone="1231231233",
             department_id=123,
+            version=3,
             return_dates=[],
             payload={"status_description": "Submitted"},
         )
@@ -643,6 +646,7 @@ class SyncPrescriptionsTaskTests(TestCase):
                     "patient_id": "updated-patient",
                     "patient_phone": "9998887777",
                     "department_id": 456,
+                    "version": 0,
                     "return_dates": [
                         {
                             "return_date": "2026-09-17",
@@ -673,6 +677,7 @@ class SyncPrescriptionsTaskTests(TestCase):
         self.assertEqual(prescription.patient_id, "updated-patient")
         self.assertEqual(prescription.patient_phone, "9998887777")
         self.assertEqual(prescription.department_id, 456)
+        self.assertEqual(prescription.version, 0)
         self.assertEqual(
             prescription.return_dates,
             [
@@ -690,6 +695,50 @@ class SyncPrescriptionsTaskTests(TestCase):
             datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc),
         )
         self.assertEqual(logs.output, ["INFO:synch.tasks:Synced 1 prescriptions."])
+
+    def test_sync_prescriptions_strips_blank_versions_from_payload(self):
+        records = []
+        for index, version in enumerate(("", None), start=1):
+            record = {
+                "id": f"prescription-{index}",
+                "date_created": "2026-03-31 14:07:57.167",
+                "date_updated": "2026-03-31 14:07:57.433",
+                "facility_id": 937324,
+                "patient_id": f"patient-{index}",
+                "patient_phone": "1231231233",
+                "department_id": 123,
+                "version": version,
+                "return_dates": [],
+                "status_description": "Submitted",
+            }
+            records.append(record)
+        records.append(
+            {
+                "id": "prescription-3",
+                "date_created": "2026-03-31 14:07:57.167",
+                "date_updated": "2026-03-31 14:07:57.433",
+                "facility_id": 937324,
+                "patient_id": "patient-3",
+                "patient_phone": "1231231233",
+                "department_id": 123,
+                "return_dates": [],
+                "status_description": "Submitted",
+            }
+        )
+        client = Mock()
+        client.iter_limited_prescriptions.return_value = iter(records)
+
+        with patch("synch.tasks.CCMDDAPIClient", return_value=client):
+            sync_prescriptions(
+                date_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+            )
+
+        for index in range(1, 4):
+            prescription = Prescription.objects.get(
+                ccmdd_prescription_id=f"prescription-{index}"
+            )
+            self.assertIsNone(prescription.version)
+            self.assertEqual(prescription.payload, {"status_description": "Submitted"})
 
 
 @override_settings(
@@ -1741,6 +1790,10 @@ class SyncAppointmentDatesToTurnTests(TestCase):
         self.assertEqual(len(turn_client.import_contacts.call_args.args[0]), 3)
         synced_patient = Patient.objects.get(ccmdd_patient_id="patient-0")
         self.assertEqual(synced_patient.turn_appointment_context_urn, "+27820000000")
+        self.assertEqual(
+            synced_patient.turn_appointment_context_appointment_type,
+            "",
+        )
         self.assertIsNotNone(synced_patient.turn_appointment_context_synced_at)
 
         with (
@@ -1773,6 +1826,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
                     "urn": "+27820000001",
                     "synch_patient_id": "patient-1",
                     "synch_next_appointment_date": "2026-04-23",
+                    "synch_appointment_type": "",
                     "synch_appointment_facility_name": "Clinic A",
                     "synch_appointment_facility_latitude": "-26.2041",
                     "synch_appointment_facility_longitude": "28.0473",
@@ -1807,6 +1861,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             patient_id=patient.ccmdd_patient_id,
             patient_phone="0820000001",
             department_id=1,
+            version=3,
             return_dates=[
                 {"return_date": "2026-04-30"},
                 {"return_date": "2026-04-21"},
@@ -1846,6 +1901,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
                     "urn": "+27820000002",
                     "synch_patient_id": "patient-with-appointment",
                     "synch_next_appointment_date": "2026-04-21",
+                    "synch_appointment_type": "CCMDD",
                     "synch_appointment_facility_name": "Clinic A",
                     "synch_appointment_facility_latitude": "-26.2041",
                     "synch_appointment_facility_longitude": "28.0473",
@@ -1877,6 +1933,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             patient_id=patient.ccmdd_patient_id,
             patient_phone="0820000002",
             department_id=1,
+            version=0,
             return_dates=[
                 {"return_date": "2026-04-20"},
                 {"return_date": "2026-04-01"},
@@ -1901,10 +1958,86 @@ class SyncAppointmentDatesToTurnTests(TestCase):
                     "urn": "+27820000002",
                     "synch_patient_id": "patient-no-upcoming-appointment",
                     "synch_next_appointment_date": "",
+                    "synch_appointment_type": "",
                     "synch_appointment_facility_name": "",
                     "synch_appointment_facility_latitude": "",
                     "synch_appointment_facility_longitude": "",
                 }
+            ]
+        )
+
+    def test_sync_appointment_dates_to_turn_maps_prescription_versions(self):
+        Facility.objects.create(
+            ccmdd_facility_id=123,
+            name="Clinic A",
+            latitude="-26.2041",
+            longitude="28.0473",
+            telephone="",
+            address_1="",
+            address_2="",
+            payload={},
+        )
+        for index, version in enumerate((0, 3, 42)):
+            patient = Patient.objects.create(
+                ccmdd_patient_id=f"patient-version-{index}",
+                date_created=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, 0, 0, 1, tzinfo=timezone.utc),
+                payload={},
+            )
+            Prescription.objects.create(
+                ccmdd_prescription_id=f"rx-version-{index}",
+                date_created=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 2, 1, 0, 0, tzinfo=timezone.utc),
+                facility_id=123,
+                patient_id=patient.ccmdd_patient_id,
+                patient_phone=f"082000000{index}",
+                department_id=1,
+                version=version,
+                return_dates=[{"return_date": "2026-04-22"}],
+                payload={},
+            )
+
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+        ):
+            sync_appointment_dates_to_turn()
+
+        turn_client.import_contacts.assert_called_once_with(
+            [
+                {
+                    "urn": "+27820000000",
+                    "synch_patient_id": "patient-version-0",
+                    "synch_next_appointment_date": "2026-04-22",
+                    "synch_appointment_type": "ICC",
+                    "synch_appointment_facility_name": "Clinic A",
+                    "synch_appointment_facility_latitude": "-26.2041",
+                    "synch_appointment_facility_longitude": "28.0473",
+                },
+                {
+                    "urn": "+27820000001",
+                    "synch_patient_id": "patient-version-1",
+                    "synch_next_appointment_date": "2026-04-22",
+                    "synch_appointment_type": "CCMDD",
+                    "synch_appointment_facility_name": "Clinic A",
+                    "synch_appointment_facility_latitude": "-26.2041",
+                    "synch_appointment_facility_longitude": "28.0473",
+                },
+                {
+                    "urn": "+27820000002",
+                    "synch_patient_id": "patient-version-2",
+                    "synch_next_appointment_date": "2026-04-22",
+                    "synch_appointment_type": "",
+                    "synch_appointment_facility_name": "Clinic A",
+                    "synch_appointment_facility_latitude": "-26.2041",
+                    "synch_appointment_facility_longitude": "28.0473",
+                },
             ]
         )
 
@@ -1946,6 +2079,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
             patient_id=patient.ccmdd_patient_id,
             patient_phone="0820000002",
             department_id=1,
+            version=3,
             return_dates=[],
             payload={},
         )
@@ -1967,6 +2101,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
                     "urn": "+27820000002",
                     "synch_patient_id": "patient-fallback-facility",
                     "synch_next_appointment_date": "",
+                    "synch_appointment_type": "",
                     "synch_appointment_facility_name": "Clinic A",
                     "synch_appointment_facility_latitude": "-26.2041",
                     "synch_appointment_facility_longitude": "28.0473",
@@ -2033,6 +2168,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
                     "urn": "+27820000002",
                     "synch_patient_id": "patient-missing-upcoming-facility",
                     "synch_next_appointment_date": "",
+                    "synch_appointment_type": "",
                     "synch_appointment_facility_name": "Clinic A",
                     "synch_appointment_facility_latitude": "-26.2041",
                     "synch_appointment_facility_longitude": "28.0473",
@@ -2122,6 +2258,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
                     "urn": "+27820000002",
                     "synch_patient_id": "patient-missing-facility",
                     "synch_next_appointment_date": "",
+                    "synch_appointment_type": "",
                     "synch_appointment_facility_name": "",
                     "synch_appointment_facility_latitude": "",
                     "synch_appointment_facility_longitude": "",
@@ -2188,6 +2325,7 @@ class SyncAppointmentDatesToTurnTests(TestCase):
                     "urn": "+27820000002",
                     "synch_patient_id": "patient-shared-rules",
                     "synch_next_appointment_date": "2026-04-22",
+                    "synch_appointment_type": "",
                     "synch_appointment_facility_name": "Clinic A",
                     "synch_appointment_facility_latitude": "-26.2041",
                     "synch_appointment_facility_longitude": "28.0473",

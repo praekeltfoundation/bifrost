@@ -56,6 +56,7 @@ class PatientTurnSyncDetails:
             "synch_next_appointment_date": (
                 next_appointment_date.isoformat() if next_appointment_date else ""
             ),
+            "synch_appointment_type": self._get_appointment_type(),
             "synch_appointment_facility_name": facility_name,
             "synch_appointment_facility_latitude": facility_latitude,
             "synch_appointment_facility_longitude": facility_longitude,
@@ -71,6 +72,7 @@ class PatientTurnSyncDetails:
             "turn_appointment_context_next_appointment_date": (
                 self._get_next_appointment_date()
             ),
+            "turn_appointment_context_appointment_type": self._get_appointment_type(),
             "turn_appointment_context_facility_name": facility_name,
             "turn_appointment_context_facility_latitude": _parse_coordinate(
                 facility_latitude
@@ -84,6 +86,15 @@ class PatientTurnSyncDetails:
         if self.tracked_appointment is None:
             return None
         return self.tracked_appointment.date
+
+    def _get_appointment_type(self) -> str:
+        if self.tracked_appointment is None:
+            return ""
+
+        return {
+            0: "ICC",
+            3: "CCMDD",
+        }.get(self.tracked_appointment.prescription.version, "")
 
     def _get_facility_values(self) -> tuple[str, str, str]:
         if self.messaging_facility is None:
@@ -117,6 +128,9 @@ class Patient(models.Model):
     turn_appointment_context_next_appointment_date: models.DateField[
         date | None, date | None
     ] = models.DateField(null=True, blank=True)
+    turn_appointment_context_appointment_type: models.CharField[str, str] = (
+        models.CharField(max_length=255, blank=True, default="")
+    )
     turn_appointment_context_facility_name: models.CharField[str, str] = (
         models.CharField(max_length=255, blank=True)
     )
@@ -293,6 +307,9 @@ class Prescription(models.Model):
     department_id: models.IntegerField[int | None, int | None] = models.IntegerField(
         null=True,
         blank=True,
+    )
+    version: models.IntegerField[int | None, int | None] = models.IntegerField(
+        null=True, blank=True
     )
     return_dates: models.JSONField[list[dict[str, Any]], list[dict[str, Any]]] = (
         models.JSONField(default=list)

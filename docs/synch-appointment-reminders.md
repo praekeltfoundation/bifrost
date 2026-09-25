@@ -11,6 +11,7 @@ Turn journeys use for reminder messaging:
 
 - `synch_patient_id`
 - `synch_next_appointment_date`
+- `synch_appointment_type`
 - `synch_appointment_facility_name`
 - `synch_appointment_facility_latitude`
 - `synch_appointment_facility_longitude`
@@ -41,6 +42,11 @@ Bifrost:
 
 When a usable **Tracked Appointment** exists, Bifrost sends its date and its
 prescription's facility to Turn.
+
+It also maps the selected appointment prescription's `version` to
+`synch_appointment_type`: `0` becomes `ICC`, `3` becomes `CCMDD`, and all other
+or missing values are blank. If no **Tracked Appointment** exists, the field is
+blank even when facility fallback is used.
 
 ## Related Prescriptions
 

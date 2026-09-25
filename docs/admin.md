@@ -30,6 +30,8 @@ return dates used by appointment and messaging tasks.
 - Listed fields: `ccmdd_prescription_id`, `patient_id`, `date_created`,
   `date_updated`.
 - Search fields: `ccmdd_prescription_id`, `patient_id`.
+- `version` is the nullable integer version received from CCMDD and is editable
+  as part of the local prescription snapshot.
 - `payload` is read-only because it stores residual upstream CCMDD prescription
   fields that were not promoted into explicit model columns.
 - `return_dates` is editable and must be a JSON list of objects.
