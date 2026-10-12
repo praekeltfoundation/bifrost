@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -14,10 +16,11 @@ from django.utils import timezone as django_timezone
 
 from lock.models import Lock, LockAcquisitionError
 from synch.ccmdd import CCMDDAPIClient
-from synch.models import Facility, Patient, Prescription
+from synch.models import Facility, Patient, PatientTurnSyncDetails, Prescription
 from synch.turn import TurnAPIClient, TurnAPIError
 
 CCMDD_SYNC_LOCK_KEY = "sync-ccmdd"
+PATIENT_BATCH_SIZE = 1000
 CCMDD_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 logger = logging.getLogger(__name__)
@@ -32,20 +35,85 @@ class PatientPhoneNumberChange:
 
 @dataclass(frozen=True)
 class PatientMessagingSnapshot:
+    today: date
+
+    def batches(self) -> Iterator[PatientMessagingBatch]:
+        facilities_by_id = {
+            facility.ccmdd_facility_id: facility
+            for facility in Facility.objects.only(
+                "ccmdd_facility_id", "name", "latitude", "longitude"
+            )
+        }
+        last_pk = 0
+        while True:
+            patients = list(
+                Patient.objects.filter(pk__gt=last_pk)
+                .order_by("pk")
+                .only(
+                    "ccmdd_patient_id",
+                    "invite_sent",
+                    "active_messaging_phone_number",
+                    "turn_appointment_context_urn",
+                    "turn_appointment_context_patient_id",
+                    "turn_appointment_context_next_appointment_date",
+                    "turn_appointment_context_appointment_type",
+                    "turn_appointment_context_facility_name",
+                    "turn_appointment_context_facility_latitude",
+                    "turn_appointment_context_facility_longitude",
+                )[:PATIENT_BATCH_SIZE]
+            )
+            if not patients:
+                return
+            last_pk = patients[-1].pk
+            patient_ids = [patient.ccmdd_patient_id for patient in patients]
+            prescriptions_by_patient_id: dict[str, list[Prescription]] = defaultdict(
+                list
+            )
+            prescriptions = (
+                Prescription.objects.filter(patient_id__in=patient_ids)
+                .order_by("patient_id", "date_created", "pk")
+                .only(
+                    "patient_id",
+                    "date_created",
+                    "facility_id",
+                    "patient_phone",
+                    "version",
+                    "return_dates",
+                )
+            )
+            for prescription in prescriptions:
+                prescriptions_by_patient_id[prescription.patient_id].append(
+                    prescription
+                )
+            yield PatientMessagingBatch(
+                patients=patients,
+                prescriptions_by_patient_id=prescriptions_by_patient_id,
+                facilities_by_id=facilities_by_id,
+                today=self.today,
+            )
+            if len(patients) < PATIENT_BATCH_SIZE:
+                return
+
+
+@dataclass(frozen=True)
+class PatientMessagingBatch:
     patients: list[Patient]
     prescriptions_by_patient_id: dict[str, list[Prescription]]
     facilities_by_id: dict[int, Facility]
     today: date
+    _details_by_patient_id: dict[str, PatientTurnSyncDetails] = dataclass_field(
+        default_factory=dict, repr=False
+    )
 
-    def get_turn_sync_details(self, patient: Patient):
-        return patient.get_turn_sync_details(
-            today=self.today,
-            prescriptions=self.prescriptions_by_patient_id.get(
-                patient.ccmdd_patient_id,
-                [],
-            ),
-            facilities_by_id=self.facilities_by_id,
-        )
+    def get_turn_sync_details(self, patient: Patient) -> PatientTurnSyncDetails:
+        patient_id = patient.ccmdd_patient_id
+        if patient_id not in self._details_by_patient_id:
+            self._details_by_patient_id[patient_id] = patient.get_turn_sync_details(
+                today=self.today,
+                prescriptions=self.prescriptions_by_patient_id.get(patient_id, []),
+                facilities_by_id=self.facilities_by_id,
+            )
+        return self._details_by_patient_id[patient_id]
 
 
 def _parse_ccmdd_timestamp(value: str) -> datetime:
@@ -98,9 +166,10 @@ def sync_all() -> None:
             sync_prescriptions(lock, date_updated=prescription_date_updated)
             sync_patients(lock, prescription_date_updated=prescription_date_updated)
             patient_messaging_snapshot = build_patient_messaging_snapshot()
-            sync_appointment_dates_to_turn(patient_messaging_snapshot, lock)
-            sync_new_patients_to_turn(patient_messaging_snapshot, lock)
-            sync_changed_patient_phone_numbers_to_turn(patient_messaging_snapshot, lock)
+            for batch in patient_messaging_snapshot.batches():
+                sync_appointment_dates_to_turn(batch, lock)
+                sync_new_patients_to_turn(batch, lock)
+                sync_changed_patient_phone_numbers_to_turn(batch, lock)
     finally:
         lock.release()
 
@@ -202,28 +271,7 @@ def _upsert_patient_record(record: dict[str, Any]) -> None:
 
 
 def build_patient_messaging_snapshot() -> PatientMessagingSnapshot:
-    patients = list(Patient.objects.order_by("pk"))
-    prescriptions_by_patient_id: dict[str, list[Prescription]] = defaultdict(list)
-    facility_ids: set[int] = set()
-
-    for prescription in Prescription.objects.order_by(
-        "patient_id", "date_created", "pk"
-    ):
-        prescriptions_by_patient_id[prescription.patient_id].append(prescription)
-        if prescription.facility_id is not None:
-            facility_ids.add(prescription.facility_id)
-
-    facilities_by_id = {
-        facility.ccmdd_facility_id: facility
-        for facility in Facility.objects.filter(ccmdd_facility_id__in=facility_ids)
-    }
-
-    return PatientMessagingSnapshot(
-        patients=patients,
-        prescriptions_by_patient_id=dict(prescriptions_by_patient_id),
-        facilities_by_id=facilities_by_id,
-        today=django_timezone.localdate(),
-    )
+    return PatientMessagingSnapshot(today=django_timezone.localdate())
 
 
 def sync_facilities(lock: Lock | None = None) -> None:
@@ -274,7 +322,7 @@ def sync_facilities(lock: Lock | None = None) -> None:
 
 
 def sync_new_patients_to_turn(
-    patient_messaging_snapshot: PatientMessagingSnapshot,
+    batch: PatientMessagingBatch,
     lock: Lock | None = None,
 ) -> None:
     timestamp = django_timezone.now().isoformat()
@@ -283,11 +331,11 @@ def sync_new_patients_to_turn(
     patient_urn_id_mapping: dict[str, str] = {}
     patient_active_phone_numbers: dict[str, str] = {}
 
-    for patient in patient_messaging_snapshot.patients:
+    for patient in batch.patients:
         if patient.invite_sent:
             continue
 
-        sync_details = patient_messaging_snapshot.get_turn_sync_details(patient)
+        sync_details = batch.get_turn_sync_details(patient)
 
         if sync_details.messaging_phone_number is None:
             logger.info(
@@ -337,9 +385,12 @@ def sync_new_patients_to_turn(
             repr(errors),
         )
 
-    updated_patients = list(
-        Patient.objects.filter(ccmdd_patient_id__in=updated_patient_ids)
-    )
+    updated_patient_id_set = set(updated_patient_ids)
+    updated_patients = [
+        patient
+        for patient in batch.patients
+        if patient.ccmdd_patient_id in updated_patient_id_set
+    ]
     for patient in updated_patients:
         patient.invite_sent = True
         patient.active_messaging_phone_number = patient_active_phone_numbers[
@@ -349,23 +400,23 @@ def sync_new_patients_to_turn(
         updated_patients,
         ["invite_sent", "active_messaging_phone_number"],
     )
-
     logger.info("Imported %s new patients to Turn.", len(rows))
 
 
 def sync_changed_patient_phone_numbers_to_turn(
-    patient_messaging_snapshot: PatientMessagingSnapshot,
+    batch: PatientMessagingBatch,
     lock: Lock | None = None,
 ) -> None:
     timestamp = django_timezone.now().isoformat()
     changes: list[PatientPhoneNumberChange] = []
 
-    for patient in patient_messaging_snapshot.patients:
+    for patient in batch.patients:
         if not patient.invite_sent or not patient.active_messaging_phone_number:
             continue
 
-        sync_details = patient_messaging_snapshot.get_turn_sync_details(patient)
-        messaging_phone_number = sync_details.messaging_phone_number
+        messaging_phone_number = batch.get_turn_sync_details(
+            patient
+        ).messaging_phone_number
         if messaging_phone_number is None:
             logger.info(
                 "Patient %s does not have a replacement messaging phone number, "
@@ -458,15 +509,15 @@ def sync_changed_patient_phone_numbers_to_turn(
 
 
 def sync_appointment_dates_to_turn(
-    patient_messaging_snapshot: PatientMessagingSnapshot,
+    batch: PatientMessagingBatch,
     lock: Lock | None = None,
 ) -> None:
     rows: list[dict[str, object]] = []
     changed_patients: list[Patient] = []
     skipped_count = 0
 
-    for patient in patient_messaging_snapshot.patients:
-        sync_details = patient_messaging_snapshot.get_turn_sync_details(patient)
+    for patient in batch.patients:
+        sync_details = batch.get_turn_sync_details(patient)
         if sync_details.messaging_phone_number is None:
             skipped_count += 1
             logger.info(

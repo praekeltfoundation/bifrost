@@ -43,6 +43,7 @@ class BenchmarkSyncAllCommandTests(TestCase):
 
         output = stdout.getvalue()
         self.assertIn("sync_all benchmark", output)
+        self.assertIn("total_queries:", output)
         self.assertIn("sync_appointment_dates_to_turn:", output)
         self.assertIn("queries", output)
         self.assertIn("select prescriptions for patient", output)
