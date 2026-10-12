@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import os
+import resource
 from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 from unittest.mock import patch
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
+from django.utils import timezone as django_timezone
 
 import synch.tasks as synch_tasks
 from lock.models import Lock
@@ -44,6 +49,9 @@ class StepProfile:
     query_count: int = 0
     query_seconds: float = 0.0
     query_groups: dict[str, QueryGroupProfile] | None = None
+    rss_before_mib: float = 0.0
+    rss_after_mib: float = 0.0
+    rss_peak_mib: float = 0.0
 
 
 class BenchmarkCCMDDClient:
@@ -52,16 +60,7 @@ class BenchmarkCCMDDClient:
 
     def iter_facilities(self) -> Iterator[dict[str, Any]]:
         for index in range(self.scale.facilities):
-            yield {
-                "id": _facility_id(index),
-                "level_desc_5": f"Benchmark Clinic {index + 1}",
-                "latitude": "-26.2041",
-                "longitude": "28.0473",
-                "telephone": "",
-                "address_1": "Benchmark Street",
-                "address_2": "",
-                "benchmark_sync_all": True,
-            }
+            yield _facility_record(index)
 
     def iter_limited_prescriptions(
         self,
@@ -71,7 +70,7 @@ class BenchmarkCCMDDClient:
         for index in range(self.scale.prescription_updates):
             yield _prescription_record(
                 index=self.scale.prescriptions + index,
-                patient_index=index % self.scale.patients,
+                patient_index=index % self.scale.appointment_updates,
                 facility_count=self.scale.facilities,
                 date_updated=BENCHMARK_DATE + timedelta(minutes=10),
             )
@@ -109,14 +108,28 @@ class Command(BaseCommand):
     help = "Benchmark synch.tasks.sync_all with mocked external CCMDD and Turn calls."
 
     def add_arguments(self, parser) -> None:
-        parser.add_argument("--facilities", type=int, default=10731)
-        parser.add_argument("--patients", type=int, default=11161)
-        parser.add_argument("--prescriptions", type=int, default=11555)
-        parser.add_argument("--appointment-updates", type=int, default=11161)
-        parser.add_argument("--new-patients", type=int, default=24)
-        parser.add_argument("--patient-updates", type=int, default=10)
-        parser.add_argument("--prescription-updates", type=int, default=25)
-        parser.add_argument("--phone-changes", type=int, default=1)
+        parser.add_argument("--facilities", type=int, default=10732)
+        parser.add_argument("--patients", type=int, default=75132)
+        parser.add_argument("--prescriptions", type=int, default=82791)
+        parser.add_argument("--appointment-updates", type=int, default=4)
+        parser.add_argument("--new-patients", type=int, default=4)
+        parser.add_argument("--patient-updates", type=int, default=5)
+        parser.add_argument("--prescription-updates", type=int, default=5)
+        parser.add_argument("--phone-changes", type=int, default=0)
+        mode = parser.add_mutually_exclusive_group()
+        mode.add_argument(
+            "--seed-only",
+            action="store_true",
+            help=(
+                "Seed data and exit, so a later run can measure memory "
+                "in a fresh process."
+            ),
+        )
+        mode.add_argument(
+            "--run-only",
+            action="store_true",
+            help="Run against previously seeded benchmark data without seeding again.",
+        )
         parser.add_argument(
             "--allow-existing-data",
             action="store_true",
@@ -144,14 +157,21 @@ class Command(BaseCommand):
         if not options["allow_existing_data"]:
             self._assert_no_non_benchmark_data()
 
-        self._delete_benchmark_data()
-        self.stdout.write("Seeding benchmark data...")
-        seed_seconds = self._time(lambda: self._seed_benchmark_data(scale))
+        seed_seconds = 0.0
+        if options["run_only"]:
+            self._assert_benchmark_scale(scale)
+        else:
+            self._delete_benchmark_data()
+            self.stdout.write("Seeding benchmark data...")
+            seed_seconds = self._time(lambda: self._seed_benchmark_data(scale))
+            if options["seed_only"]:
+                return
 
         step_profiles: dict[str, StepProfile] = {}
         turn_client = BenchmarkTurnClient()
 
         self.stdout.write("Running sync_all benchmark...")
+        rss_baseline_mib = _rss_mib()
         with (
             patch(
                 "synch.tasks.CCMDDAPIClient", return_value=BenchmarkCCMDDClient(scale)
@@ -174,6 +194,7 @@ class Command(BaseCommand):
             ),
         ):
             total_seconds = self._time(synch_tasks.sync_all)
+        rss_after_sync_mib = _rss_mib()
 
         self._write_report(
             seed_seconds=seed_seconds,
@@ -181,6 +202,8 @@ class Command(BaseCommand):
             step_profiles=step_profiles,
             turn_client=turn_client,
             scale=scale,
+            rss_baseline_mib=rss_baseline_mib,
+            rss_after_sync_mib=rss_after_sync_mib,
         )
 
         if options["cleanup"]:
@@ -242,6 +265,18 @@ class Command(BaseCommand):
         Patient.objects.filter(payload__benchmark_sync_all=True).delete()
         Facility.objects.filter(payload__benchmark_sync_all=True).delete()
 
+    def _assert_benchmark_scale(self, scale: BenchmarkScale) -> None:
+        actual = (
+            Facility.objects.filter(payload__benchmark_sync_all=True).count(),
+            Patient.objects.filter(payload__benchmark_sync_all=True).count(),
+            Prescription.objects.filter(payload__benchmark_sync_all=True).count(),
+        )
+        expected = (scale.facilities, scale.patients, scale.prescriptions)
+        if actual != expected:
+            raise CommandError(
+                f"Seeded counts {actual} do not match requested scale {expected}."
+            )
+
     def _seed_benchmark_data(self, scale: BenchmarkScale) -> None:
         with transaction.atomic():
             Facility.objects.bulk_create(
@@ -254,7 +289,7 @@ class Command(BaseCommand):
                         telephone="",
                         address_1="Benchmark Street",
                         address_2="",
-                        payload={"benchmark_sync_all": True},
+                        payload=_facility_payload(),
                     )
                     for index in range(scale.facilities)
                 ],
@@ -272,7 +307,8 @@ class Command(BaseCommand):
                             if index >= scale.new_patients
                             else ""
                         ),
-                        payload={"benchmark_sync_all": True},
+                        **_patient_context(index, scale),
+                        payload=_patient_payload(),
                     )
                     for index in range(scale.patients)
                 ],
@@ -287,17 +323,11 @@ class Command(BaseCommand):
                         + timedelta(seconds=index),
                         date_updated=BENCHMARK_DATE - timedelta(days=1),
                         facility_id=_facility_id(index % scale.facilities),
-                        patient_id=_patient_id(index % scale.appointment_updates),
-                        patient_phone=_current_phone(index % scale.appointment_updates),
+                        patient_id=_patient_id(index % scale.patients),
+                        patient_phone=_current_phone(index % scale.patients),
                         department_id=1,
-                        return_dates=[
-                            {
-                                "return_date": (
-                                    date(2026, 7, 1) + timedelta(days=index % 28)
-                                ).isoformat()
-                            }
-                        ],
-                        payload={"benchmark_sync_all": True},
+                        return_dates=_return_dates(),
+                        payload=_prescription_payload(),
                     )
                     for index in range(scale.prescriptions)
                 ],
@@ -326,6 +356,7 @@ class Command(BaseCommand):
                     group.seconds += query_duration
 
             start = perf_counter()
+            rss_before_mib = _rss_mib()
             try:
                 with connection.execute_wrapper(query_wrapper):
                     return original(*args, **kwargs)
@@ -335,6 +366,9 @@ class Command(BaseCommand):
                     query_count=query_count,
                     query_seconds=query_seconds,
                     query_groups=dict(query_groups),
+                    rss_before_mib=rss_before_mib,
+                    rss_after_mib=_rss_mib(),
+                    rss_peak_mib=_peak_rss_mib(),
                 )
 
         return patch(f"synch.tasks.{name}", profiled_step)
@@ -347,11 +381,16 @@ class Command(BaseCommand):
         step_profiles: dict[str, StepProfile],
         turn_client: BenchmarkTurnClient,
         scale: BenchmarkScale,
+        rss_baseline_mib: float,
+        rss_after_sync_mib: float,
     ) -> None:
         self.stdout.write("")
         self.stdout.write("sync_all benchmark")
         self.stdout.write(f"  seed_seconds: {seed_seconds:.3f}")
         self.stdout.write(f"  total_seconds: {total_seconds:.3f}")
+        self.stdout.write(f"  rss_baseline_mib: {rss_baseline_mib:.1f}")
+        self.stdout.write(f"  rss_peak_mib: {_peak_rss_mib():.1f}")
+        self.stdout.write(f"  rss_after_sync_mib: {rss_after_sync_mib:.1f}")
         for name, profile in sorted(
             step_profiles.items(),
             key=lambda item: item[1].seconds,
@@ -361,6 +400,11 @@ class Command(BaseCommand):
                 f"  {name}: {profile.seconds:.3f}s "
                 f"({profile.query_count} queries, "
                 f"{profile.query_seconds:.3f}s DB)"
+            )
+            self.stdout.write(
+                f"    rss_before_mib: {profile.rss_before_mib:.1f}, "
+                f"rss_after_mib: {profile.rss_after_mib:.1f}, "
+                f"rss_peak_mib: {profile.rss_peak_mib:.1f}"
             )
             query_groups = profile.query_groups or {}
             for group_name, group_profile in sorted(
@@ -419,7 +463,7 @@ def _patient_record(index: int, date_updated: datetime) -> dict[str, Any]:
         "id": _patient_id(index),
         "date_created": "2026-03-26 06:00:00.000",
         "date_updated": date_updated.strftime(synch_tasks.CCMDD_TIMESTAMP_FORMAT),
-        "benchmark_sync_all": True,
+        **_patient_payload(),
     }
 
 
@@ -438,8 +482,155 @@ def _prescription_record(
         "patient_id": _patient_id(patient_index),
         "patient_phone": _current_phone(patient_index),
         "department_id": 1,
-        "return_dates": [{"return_date": "2026-07-01"}],
+        "return_dates": _return_dates(),
+        **_prescription_payload(),
+    }
+
+
+def _rss_mib() -> float:
+    with Path("/proc/self/statm").open(encoding="ascii") as statm:
+        resident_pages = int(statm.read().split()[1])
+    return resident_pages * os.sysconf("SC_PAGE_SIZE") / 1024**2
+
+
+def _peak_rss_mib() -> float:
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
+def _facility_payload() -> dict[str, Any]:
+    return {
         "benchmark_sync_all": True,
+        "fax": None,
+        "email": None,
+        "active": 1,
+        "deleted": 0,
+        "manager": None,
+        "cellphone": None,
+        "ownership": "Gov Province",
+        "level_id_1": 1,
+        "level_id_2": 333920,
+        "level_id_3": 757012,
+        "level_id_4": 438613,
+        "level_id_5": 7758690,
+        "population": "Urban",
+        "level_uid_1": "JLA7wl59oN3",
+        "level_uid_2": "HpotDYGlHB5",
+        "level_uid_3": "CT8lZ9vouCK",
+        "level_uid_4": "G9ieiEXTovG",
+        "level_uid_5": "JJP5aUj398L",
+        "date_created": "2026-07-23 11:48:54.687",
+        "date_updated": "2026-07-23 11:48:54.687",
+        "level_code_1": "za South Africa",
+        "level_code_2": "gp Gauteng Province",
+        "level_code_3": "gp City of Johannesburg Metropolitan Municipality",
+        "level_code_4": "gp Johannesburg F Health sub-District",
+        "level_code_5": "gp Johannesburg Health District Wellness Clinic",
+        "level_desc_1": "South Africa",
+        "level_desc_2": "Gauteng",
+        "level_desc_3": "Johannesburg MM",
+        "level_desc_4": "Johannesburg F SD",
+        "nhi_district": 0,
+        "classification": "Clinic",
+    }
+
+
+def _facility_record(index: int) -> dict[str, Any]:
+    return {
+        "id": _facility_id(index),
+        "level_desc_5": f"Benchmark Clinic {index + 1}",
+        "latitude": "-26.2041",
+        "longitude": "28.0473",
+        "telephone": "",
+        "address_1": "Benchmark Street",
+        "address_2": "",
+        **_facility_payload(),
+    }
+
+
+def _patient_payload() -> dict[str, Any]:
+    return {
+        "benchmark_sync_all": True,
+        "gender": 3,
+        "surname": "Example",
+        "language": "English",
+        "firstname": "Benchmark",
+        "date_of_birth": "1992-09-19",
+        "hprs_reference": "1234567898",
+        "gender_description": "Female",
+        "hprs_last_update_date": None,
+    }
+
+
+def _prescription_payload() -> dict[str, Any]:
+    return {
+        "benchmark_sync_all": True,
+        "repeats": None,
+        "nok_contact": None,
+        "nok_surname": None,
+        "pharmacy_id": None,
+        "serviceable": 0,
+        "nok_relation": None,
+        "patient_ward": None,
+        "nok_firstname": None,
+        "patient_address": "123 Benchmark Street\nEXAMPLE\n1234",
+        "prescribed_date": "2026-10-12",
+        "prescribed_time": "08:45:06.0000000",
+        "prescriber_name": "Benchmark Prescriber",
+        "submission_date": "2026-10-12",
+        "collection_dates": [],
+        "patient_phone_alt": None,
+        "prescriber_number": "12345613",
+        "prescribing_level": 1,
+        "date_api_last_read": None,
+        "patient_smartphone": 1,
+        "prescriber_surname": "Example",
+        "status_description": "Submitted",
+        "date_api_first_read": None,
+        "prescription_length": None,
+        "service_provider_id": -1,
+        "clinic_file_reference": "BENCH123456",
+        "prescription_status_id": 5,
+        "date_api_confirmed_data": None,
+        "prescribing_level_description": "Primary Health Care",
+    }
+
+
+def _return_dates() -> list[dict[str, Any]]:
+    today = django_timezone.localdate()
+    return [
+        {
+            "note": "Testing",
+            "day_count": 28,
+            "description": "1 Month",
+            "return_date": (today + timedelta(days=28)).isoformat(),
+        },
+        {
+            "note": "Benchmark",
+            "day_count": 168,
+            "description": "6 Months",
+            "return_date": (today + timedelta(days=168)).isoformat(),
+        },
+    ]
+
+
+def _patient_context(index: int, scale: BenchmarkScale) -> dict[str, Any]:
+    if index < scale.appointment_updates or index >= scale.prescriptions:
+        return {}
+    last_prescription_index = (
+        index + ((scale.prescriptions - 1 - index) // scale.patients) * scale.patients
+    )
+    facility_index = last_prescription_index % scale.facilities
+    return {
+        "turn_appointment_context_urn": f"+27{_current_phone(index)[1:]}",
+        "turn_appointment_context_patient_id": _patient_id(index),
+        "turn_appointment_context_next_appointment_date": (
+            django_timezone.localdate() + timedelta(days=28)
+        ),
+        "turn_appointment_context_facility_name": (
+            f"Benchmark Clinic {facility_index + 1}"
+        ),
+        "turn_appointment_context_facility_latitude": Decimal("-26.2041"),
+        "turn_appointment_context_facility_longitude": Decimal("28.0473"),
     }
 
 
