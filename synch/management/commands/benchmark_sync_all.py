@@ -45,6 +45,7 @@ class QueryGroupProfile:
 
 @dataclass
 class StepProfile:
+    calls: int = 0
     seconds: float = 0.0
     query_count: int = 0
     query_seconds: float = 0.0
@@ -169,6 +170,12 @@ class Command(BaseCommand):
 
         step_profiles: dict[str, StepProfile] = {}
         turn_client = BenchmarkTurnClient()
+        total_query_count = 0
+
+        def count_query(execute, sql, params, many, context):
+            nonlocal total_query_count
+            total_query_count += 1
+            return execute(sql, params, many, context)
 
         self.stdout.write("Running sync_all benchmark...")
         rss_baseline_mib = _rss_mib()
@@ -192,6 +199,7 @@ class Command(BaseCommand):
                 "sync_changed_patient_phone_numbers_to_turn",
                 step_profiles,
             ),
+            connection.execute_wrapper(count_query),
         ):
             total_seconds = self._time(synch_tasks.sync_all)
         rss_after_sync_mib = _rss_mib()
@@ -199,6 +207,7 @@ class Command(BaseCommand):
         self._write_report(
             seed_seconds=seed_seconds,
             total_seconds=total_seconds,
+            total_query_count=total_query_count,
             step_profiles=step_profiles,
             turn_client=turn_client,
             scale=scale,
@@ -361,15 +370,23 @@ class Command(BaseCommand):
                 with connection.execute_wrapper(query_wrapper):
                     return original(*args, **kwargs)
             finally:
-                profiles[name] = StepProfile(
-                    seconds=perf_counter() - start,
-                    query_count=query_count,
-                    query_seconds=query_seconds,
-                    query_groups=dict(query_groups),
-                    rss_before_mib=rss_before_mib,
-                    rss_after_mib=_rss_mib(),
-                    rss_peak_mib=_peak_rss_mib(),
-                )
+                profile = profiles.setdefault(name, StepProfile())
+                if profile.calls == 0:
+                    profile.rss_before_mib = rss_before_mib
+                profile.calls += 1
+                profile.seconds += perf_counter() - start
+                profile.query_count += query_count
+                profile.query_seconds += query_seconds
+                profile.rss_after_mib = _rss_mib()
+                profile.rss_peak_mib = max(profile.rss_peak_mib, _peak_rss_mib())
+                if profile.query_groups is None:
+                    profile.query_groups = {}
+                for group_name, group in query_groups.items():
+                    total = profile.query_groups.setdefault(
+                        group_name, QueryGroupProfile()
+                    )
+                    total.count += group.count
+                    total.seconds += group.seconds
 
         return patch(f"synch.tasks.{name}", profiled_step)
 
@@ -378,6 +395,7 @@ class Command(BaseCommand):
         *,
         seed_seconds: float,
         total_seconds: float,
+        total_query_count: int,
         step_profiles: dict[str, StepProfile],
         turn_client: BenchmarkTurnClient,
         scale: BenchmarkScale,
@@ -388,6 +406,7 @@ class Command(BaseCommand):
         self.stdout.write("sync_all benchmark")
         self.stdout.write(f"  seed_seconds: {seed_seconds:.3f}")
         self.stdout.write(f"  total_seconds: {total_seconds:.3f}")
+        self.stdout.write(f"  total_queries: {total_query_count}")
         self.stdout.write(f"  rss_baseline_mib: {rss_baseline_mib:.1f}")
         self.stdout.write(f"  rss_peak_mib: {_peak_rss_mib():.1f}")
         self.stdout.write(f"  rss_after_sync_mib: {rss_after_sync_mib:.1f}")
@@ -397,7 +416,7 @@ class Command(BaseCommand):
             reverse=True,
         ):
             self.stdout.write(
-                f"  {name}: {profile.seconds:.3f}s "
+                f"  {name}: {profile.seconds:.3f}s over {profile.calls} call(s) "
                 f"({profile.query_count} queries, "
                 f"{profile.query_seconds:.3f}s DB)"
             )
