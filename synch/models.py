@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, ClassVar
 
 from django.contrib.auth.models import User
 from django.db import models
@@ -317,6 +317,11 @@ class Prescription(models.Model):
     payload: models.JSONField[dict[str, Any], dict[str, Any]] = models.JSONField(
         default=dict
     )
+
+    class Meta:
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["patient_id"], name="synch_presc_patient_id_idx")
+        ]
 
     def __str__(self) -> str:
         return self.ccmdd_prescription_id

@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from unittest.mock import ANY, Mock, call, patch
 
 from celery.schedules import crontab
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils.module_loading import import_string
 
 from bifrost.celery import app
@@ -27,20 +29,24 @@ from synch.tasks import (
 from synch.tasks import (
     sync_new_patients_to_turn as _sync_new_patients_to_turn,
 )
+from synch.turn import TurnAPIError
 
 TEST_PASSWORD = "test-password"  # noqa: S105
 
 
 def sync_new_patients_to_turn(lock: Lock | None = None) -> None:
-    _sync_new_patients_to_turn(build_patient_messaging_snapshot(), lock)
+    for batch in build_patient_messaging_snapshot().batches():
+        _sync_new_patients_to_turn(batch, lock)
 
 
 def sync_changed_patient_phone_numbers_to_turn(lock: Lock | None = None) -> None:
-    _sync_changed_phone_numbers_to_turn(build_patient_messaging_snapshot(), lock)
+    for batch in build_patient_messaging_snapshot().batches():
+        _sync_changed_phone_numbers_to_turn(batch, lock)
 
 
 def sync_appointment_dates_to_turn(lock: Lock | None = None) -> None:
-    _sync_appointment_dates_to_turn(build_patient_messaging_snapshot(), lock)
+    for batch in build_patient_messaging_snapshot().batches():
+        _sync_appointment_dates_to_turn(batch, lock)
 
 
 class CeleryConfigurationTests(TestCase):
@@ -84,6 +90,22 @@ class CeleryConfigurationTests(TestCase):
     CELERY_TASK_EAGER_PROPAGATES=True,
 )
 class CeleryTaskExecutionTests(TestCase):
+    def test_batch_reuses_patient_turn_details_across_steps(self):
+        Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            payload={},
+        )
+
+        batch = next(build_patient_messaging_snapshot().batches())
+        patient = batch.patients[0]
+
+        self.assertIs(
+            batch.get_turn_sync_details(patient),
+            batch.get_turn_sync_details(patient),
+        )
+
     def test_healthcheck_task_runs(self):
         result = healthcheck.delay()
 
@@ -93,6 +115,12 @@ class CeleryTaskExecutionTests(TestCase):
     def test_sync_all_runs_facility_sync_before_prescription_sync_before_patient_sync(
         self,
     ):
+        Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            payload={},
+        )
         with (
             patch("synch.tasks.sync_facilities") as sync_facilities_mock,
             patch("synch.tasks.sync_prescriptions") as sync_prescriptions_mock,
@@ -163,6 +191,69 @@ class CeleryTaskExecutionTests(TestCase):
         sync_appointment_dates_to_turn_mock.assert_not_called()
         sync_new_patients_to_turn.assert_not_called()
 
+    def test_sync_all_loads_each_group_once_and_runs_all_turn_steps(self):
+        Facility.objects.create(ccmdd_facility_id=1, name="Clinic", payload={})
+        for index in range(2):
+            Patient.objects.create(
+                ccmdd_patient_id=f"patient-{index}",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                payload={},
+            )
+            Prescription.objects.create(
+                ccmdd_prescription_id=f"rx-{index}",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                patient_id=f"patient-{index}",
+                facility_id=1,
+                payload={},
+            )
+        events: list[tuple[str, str]] = []
+
+        def record_step(name):
+            def record(batch, lock):
+                events.append((name, batch.patients[0].ccmdd_patient_id))
+
+            return record
+
+        with (
+            patch("synch.tasks.PATIENT_BATCH_SIZE", 1),
+            patch("synch.tasks.sync_facilities"),
+            patch("synch.tasks.sync_prescriptions"),
+            patch("synch.tasks.sync_patients"),
+            patch(
+                "synch.tasks.sync_appointment_dates_to_turn",
+                side_effect=record_step("appointment"),
+            ),
+            patch(
+                "synch.tasks.sync_new_patients_to_turn",
+                side_effect=record_step("invite"),
+            ),
+            patch(
+                "synch.tasks.sync_changed_patient_phone_numbers_to_turn",
+                side_effect=record_step("phone"),
+            ),
+            CaptureQueriesContext(connection) as queries,
+        ):
+            sync_all.delay()
+
+        self.assertEqual(
+            events,
+            [
+                (step, patient_id)
+                for patient_id in ("patient-0", "patient-1")
+                for step in ("appointment", "invite", "phone")
+            ],
+        )
+        self.assertEqual(
+            sum('FROM "synch_patient"' in query["sql"] for query in queries),
+            3,
+        )
+        self.assertEqual(
+            sum('FROM "synch_facility"' in query["sql"] for query in queries),
+            1,
+        )
+
     def test_sync_all_does_not_run_prescriptions_when_facility_sync_fails(self):
         with (
             patch("synch.tasks.sync_facilities", side_effect=RuntimeError("boom")),
@@ -212,6 +303,12 @@ class CeleryTaskExecutionTests(TestCase):
         sync_new_patients_to_turn.assert_not_called()
 
     def test_sync_all_propagates_turn_sync_errors(self):
+        Patient.objects.create(
+            ccmdd_patient_id="patient-1",
+            date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            payload={},
+        )
         with (
             patch("synch.tasks.sync_facilities"),
             patch("synch.tasks.sync_prescriptions"),
@@ -277,6 +374,46 @@ class CeleryTaskExecutionTests(TestCase):
         self.assertFalse(Patient.objects.exists())
         self.assertFalse(Facility.objects.exists())
         self.assertFalse(Prescription.objects.exists())
+
+    def test_sync_all_rolls_back_earlier_group_when_later_turn_group_fails(self):
+        Facility.objects.create(ccmdd_facility_id=1, name="Clinic", payload={})
+        for index in range(2):
+            Patient.objects.create(
+                ccmdd_patient_id=f"patient-{index}",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                payload={},
+            )
+            Prescription.objects.create(
+                ccmdd_prescription_id=f"rx-{index}",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                facility_id=1,
+                patient_id=f"patient-{index}",
+                patient_phone=f"082000000{index}",
+                payload={},
+            )
+        turn_client = Mock()
+        turn_client.import_contacts.side_effect = [
+            [],
+            [],
+            [{"urn": "+27820000001", "error": "ERROR: failed"}],
+        ]
+
+        with (
+            patch("synch.tasks.PATIENT_BATCH_SIZE", 1),
+            patch("synch.tasks.sync_facilities"),
+            patch("synch.tasks.sync_prescriptions"),
+            patch("synch.tasks.sync_patients"),
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            self.assertRaises(TurnAPIError),
+        ):
+            sync_all.delay()
+
+        self.assertEqual(turn_client.import_contacts.call_count, 3)
+        self.assertFalse(
+            Patient.objects.exclude(turn_appointment_context_urn="").exists()
+        )
 
     def test_sync_all_skips_when_top_level_lock_is_already_held(self):
         Lock.acquire("sync-ccmdd")
@@ -905,6 +1042,41 @@ class SyncFacilitiesTaskTests(TestCase):
     TURN_TOKEN=TEST_PASSWORD,
 )
 class SyncNewPatientsToTurnTests(TestCase):
+    def test_reads_complete_prescription_history_for_each_batch(self):
+        Facility.objects.create(ccmdd_facility_id=1, name="Clinic A", payload={})
+        for index in range(3):
+            Patient.objects.create(
+                ccmdd_patient_id=f"patient-{index}",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                invite_sent=index != 2,
+                payload={},
+            )
+            Prescription.objects.create(
+                ccmdd_prescription_id=f"rx-{index}",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                facility_id=1,
+                patient_id=f"patient-{index}",
+                patient_phone=f"082000000{index}",
+                payload={},
+            )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.PATIENT_BATCH_SIZE", 1),
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            CaptureQueriesContext(connection) as queries,
+        ):
+            sync_new_patients_to_turn()
+
+        prescription_selects = [
+            query for query in queries if 'FROM "synch_prescription"' in query["sql"]
+        ]
+        self.assertEqual(len(prescription_selects), 3)
+        turn_client.import_contacts.assert_called_once()
+
     def test_sync_new_patients_to_turn_imports_latest_valid_phone_for_eligible_patient(
         self,
     ):
@@ -1502,9 +1674,11 @@ class SyncChangedPatientPhoneNumbersToTurnTests(TestCase):
 
         with (
             patch("synch.tasks.TurnAPIClient", return_value=turn_client),
-            self.assertNumQueries(4),
+            CaptureQueriesContext(connection) as queries,
         ):
             sync_changed_patient_phone_numbers_to_turn()
+
+        self.assertEqual(len(queries), 4)
 
         self.assertEqual(
             turn_client.import_contacts.call_args_list,
@@ -1743,6 +1917,68 @@ class SyncChangedPatientPhoneNumbersToTurnTests(TestCase):
     TURN_TOKEN=TEST_PASSWORD,
 )
 class SyncAppointmentDatesToTurnTests(TestCase):
+    def test_processes_patient_groups_with_complete_prescription_history(self):
+        Facility.objects.create(ccmdd_facility_id=123, name="Clinic A", payload={})
+        for index in range(3):
+            Patient.objects.create(
+                ccmdd_patient_id=f"patient-{index}",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                payload={"unused": "large" * 1000},
+            )
+            Prescription.objects.create(
+                ccmdd_prescription_id=f"rx-{index}",
+                date_created=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                date_updated=datetime(2026, 4, 1, tzinfo=timezone.utc),
+                facility_id=123,
+                patient_id=f"patient-{index}",
+                patient_phone=f"082000000{index}",
+                return_dates=[{"return_date": "2026-04-22"}],
+                payload={"unused": "large" * 1000},
+            )
+        Prescription.objects.create(
+            ccmdd_prescription_id="rx-latest-phone",
+            date_created=datetime(2026, 4, 3, tzinfo=timezone.utc),
+            date_updated=datetime(2026, 4, 3, tzinfo=timezone.utc),
+            facility_id=123,
+            patient_id="patient-2",
+            patient_phone="0831234567",
+            return_dates=[],
+            payload={},
+        )
+        turn_client = Mock()
+        turn_client.import_contacts.return_value = []
+
+        with (
+            patch("synch.tasks.PATIENT_BATCH_SIZE", 2),
+            patch("synch.tasks.TurnAPIClient", return_value=turn_client),
+            patch(
+                "synch.tasks.django_timezone.localdate",
+                return_value=datetime(2026, 4, 21).date(),
+            ),
+            CaptureQueriesContext(connection) as queries,
+        ):
+            sync_appointment_dates_to_turn()
+
+        self.assertEqual(turn_client.import_contacts.call_count, 2)
+        self.assertEqual(
+            turn_client.import_contacts.call_args.args[0][0]["urn"],
+            "+27831234567",
+        )
+        self.assertEqual(
+            turn_client.import_contacts.call_args.args[0][0][
+                "synch_next_appointment_date"
+            ],
+            "2026-04-22",
+        )
+        self.assertFalse(
+            any(
+                '"payload"' in query["sql"]
+                for query in queries
+                if "SELECT" in query["sql"]
+            )
+        )
+
     def test_sync_appointment_dates_to_turn_bulk_loads_patient_messaging_state(
         self,
     ):
