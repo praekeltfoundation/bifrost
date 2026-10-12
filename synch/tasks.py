@@ -20,7 +20,7 @@ from synch.models import Facility, Patient, PatientTurnSyncDetails, Prescription
 from synch.turn import TurnAPIClient, TurnAPIError
 
 CCMDD_SYNC_LOCK_KEY = "sync-ccmdd"
-PATIENT_BATCH_SIZE = 1000
+PATIENT_BATCH_SIZE = 10000
 CCMDD_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 logger = logging.getLogger(__name__)

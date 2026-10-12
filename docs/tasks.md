@@ -26,7 +26,7 @@ It exists as a minimal Celery execution check so the project can verify that:
 - It runs `sync_prescriptions` second with that captured watermark.
 - It runs `sync_patients` third with the same captured prescription watermark.
 - It fixes today's date for messaging decisions, then reads patients in groups
-  of 1,000 with all prescriptions for each group. It loads the required fields
+  of 10,000 with all prescriptions for each group. It loads the required fields
   from all facilities once and shares that lookup across the groups.
 - The messaging reads select only fields needed for Turn and omit stored JSON
   payloads. Each group is loaded once, and computed Turn details are reused
